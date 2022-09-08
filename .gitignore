@@ -3,3 +3,5 @@
 __pycache__/
 *.sh
 local_tools/
+checkpoints
+data

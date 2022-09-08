@@ -52,7 +52,8 @@ use_nsf: true
 
 # config for experiments
 max_frames: 5000
-max_tokens: 40000
+max_tokens: 36000
+# max_tokens: 40000
 predictor_layers: 5
 rel_pos: true
 dur_predictor_layers: 5  # *
