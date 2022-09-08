@@ -19,7 +19,7 @@ f0_mel_min = 1127 * np.log(1 + f0_min / 700)
 f0_mel_max = 1127 * np.log(1 + f0_max / 700)
 
 
-def f0_to_coarse(f0):
+def f0_to_coarse(f0): # discretize the f0 into [0,255] ints
     is_torch = isinstance(f0, torch.Tensor)
     f0_mel = 1127 * (1 + f0 / 700).log() if is_torch else 1127 * np.log(1 + f0 / 700)
     f0_mel[f0_mel > 0] = (f0_mel[f0_mel > 0] - f0_mel_min) * (f0_bin - 2) / (f0_mel_max - f0_mel_min) + 1

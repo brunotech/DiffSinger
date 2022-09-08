@@ -59,7 +59,7 @@ class PeDataset(BaseDataset):
             "item_name": item['item_name'],
             "text": item['txt'],
             "mel": spec,
-            "pitch": pitch,
+            "pitch": pitch, # discrete f0
             "f0": f0,
             "uv": uv,
             # "mel2ph": mel2ph,

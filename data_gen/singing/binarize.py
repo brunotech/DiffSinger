@@ -202,9 +202,9 @@ class MidiSingingBinarizer(SingingBinarizer):
                 self.item2wdb[item_name] = [1 if x in ALL_YUNMU + ['AP', 'SP', '<SIL>'] else 0 for x in song_item['phs']]
                 self.item2ph_durs[item_name] = song_item['ph_dur']
 
-                self.item2midi[item_name] = song_item['notes']
+                self.item2midi[item_name] = song_item['notes'] # 音节对应的序号
                 self.item2midi_dur[item_name] = song_item['notes_dur']
-                self.item2is_slur[item_name] = song_item['is_slur']
+                self.item2is_slur[item_name] = song_item['is_slur'] # 连唱线
                 self.item2spk[item_name] = 'pop-cs'
                 if len(self.processed_data_dirs) > 1:
                     self.item2spk[item_name] = f"ds{ds_id}_{self.item2spk[item_name]}"
