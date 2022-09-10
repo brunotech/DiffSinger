@@ -63,7 +63,7 @@ def norm_interp_f0(f0, hparams):
 def denorm_f0(f0, uv, hparams, pitch_padding=None, min=None, max=None):
     if hparams['pitch_norm'] == 'standard':
         f0 = f0 * hparams['f0_std'] + hparams['f0_mean']
-    if hparams['pitch_norm'] == 'log':
+    if hparams['pitch_norm'] == 'log': # default true
         f0 = 2 ** f0
     if min is not None:
         f0 = f0.clamp(min=min)

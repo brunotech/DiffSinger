@@ -1,3 +1,4 @@
+from cgitb import enable
 from modules.commons.common_layers import *
 from modules.commons.common_layers import Embedding
 from modules.fastspeech.tts_modules import FastspeechDecoder, DurationPredictor, LengthRegulator, PitchPredictor, \
@@ -5,6 +6,9 @@ from modules.fastspeech.tts_modules import FastspeechDecoder, DurationPredictor,
 from utils.cwt import cwt2f0
 from utils.hparams import hparams
 from utils.pitch_utils import f0_to_coarse, denorm_f0, norm_f0
+
+from modules.fap.attribute_prediction_model import AGAP, f0_model_config
+from modules.fap.loss import AttributePredictionLoss
 
 FS_ENCODERS = {
     'fft': lambda hp, embed_tokens, d: FastspeechEncoder(
@@ -18,7 +22,7 @@ FS_DECODERS = {
 }
 
 
-class FastSpeech2(nn.Module):
+class FastSpeech2Flow(nn.Module):
     def __init__(self, dictionary, out_dims=None):
         super().__init__()
         self.dictionary = dictionary
@@ -51,31 +55,23 @@ class FastSpeech2(nn.Module):
         self.length_regulator = LengthRegulator()
         if hparams['use_pitch_embed']:
             self.pitch_embed = Embedding(300, self.hidden_size, self.padding_idx)
-            if hparams['pitch_type'] == 'cwt':
-                h = hparams['cwt_hidden_size']
-                cwt_out_dims = 10
-                if hparams['use_uv']:
-                    cwt_out_dims = cwt_out_dims + 1
-                self.cwt_predictor = nn.Sequential(
-                    nn.Linear(self.hidden_size, h),
-                    PitchPredictor(
-                        h,
-                        n_chans=predictor_hidden,
-                        n_layers=hparams['predictor_layers'],
-                        dropout_rate=hparams['predictor_dropout'], odim=cwt_out_dims,
-                        padding=hparams['ffn_padding'], kernel_size=hparams['predictor_kernel']))
-                self.cwt_stats_layers = nn.Sequential(
-                    nn.Linear(self.hidden_size, h), nn.ReLU(),
-                    nn.Linear(h, h), nn.ReLU(), nn.Linear(h, 2)
-                )
-            else:
-                self.pitch_predictor = PitchPredictor(
-                    self.hidden_size,
-                    n_chans=predictor_hidden,
-                    n_layers=hparams['predictor_layers'],
-                    dropout_rate=hparams['predictor_dropout'],
-                    odim=2 if hparams['pitch_type'] == 'frame' else 1,
-                    padding=hparams['ffn_padding'], kernel_size=hparams['predictor_kernel'])
+            self.pitch_predictor = PitchPredictor(
+                self.hidden_size,
+                n_chans=predictor_hidden,
+                n_layers=hparams['predictor_layers'],
+                dropout_rate=hparams['predictor_dropout'],
+                odim=2 if hparams['pitch_type'] == 'frame' else 1,
+                padding=hparams['ffn_padding'], kernel_size=hparams['predictor_kernel'])
+            
+            self.pred_f0_uv_encoder = nn.Sequential(*[
+                nn.Conv1d(2, 64, kernel_size=3, stride=1, padding=1, dilation=1),
+                nn.ReLU(),
+                nn.Conv1d(64, 64, kernel_size=3, stride=1, padding=1, dilation=1),
+            ])
+            f0_model_config['hparams']['bottleneck_hparams']['in_dim'] = self.hidden_size + 64
+            self.pitch_flow = AGAP(**f0_model_config['hparams'])
+            self.pitch_loss_fn = AttributePredictionLoss("f0", f0_model_config, 1.0)
+
         if hparams['use_energy_embed']:
             self.energy_embed = Embedding(256, self.hidden_size, self.padding_idx)
             self.energy_predictor = EnergyPredictor(
@@ -92,7 +88,7 @@ class FastSpeech2(nn.Module):
 
     def forward(self, txt_tokens, mel2ph=None, spk_embed=None,
                 ref_mels=None, f0=None, uv=None, energy=None, skip_decoder=False,
-                spk_embed_dur_id=None, spk_embed_f0_id=None, infer=False, **kwargs):
+                spk_embed_dur_id=None, spk_embed_f0_id=None, infer=False, enable_pitch_flow=False, **kwargs):
         ret = {}
         encoder_out = self.encoder(txt_tokens)  # [B, T, C]
         src_nonpadding = (txt_tokens > 0).float()[:, :, None]
@@ -136,7 +132,7 @@ class FastSpeech2(nn.Module):
         pitch_inp = (decoder_inp_origin + var_embed + spk_embed_f0) * tgt_nonpadding
         if hparams['use_pitch_embed']:
             pitch_inp_ph = (encoder_out + var_embed + spk_embed_f0) * src_nonpadding
-            decoder_inp = decoder_inp + self.add_pitch(pitch_inp, f0, uv, mel2ph, ret, encoder_out=pitch_inp_ph)
+            decoder_inp = decoder_inp + self.add_pitch(pitch_inp, f0, uv, mel2ph, ret, encoder_out=pitch_inp_ph, infer=infer, enable_pitch_flow=enable_pitch_flow)
         if hparams['use_energy_embed']:
             decoder_inp = decoder_inp + self.add_energy(pitch_inp, energy, ret)
 
@@ -182,49 +178,50 @@ class FastSpeech2(nn.Module):
         energy_embed = self.energy_embed(energy)
         return energy_embed
 
-    def add_pitch(self, decoder_inp, f0, uv, mel2ph, ret, encoder_out=None):
-        if hparams['pitch_type'] == 'ph':
-            pitch_pred_inp = encoder_out.detach() + hparams['predictor_grad'] * (encoder_out - encoder_out.detach())
-            pitch_padding = encoder_out.sum().abs() == 0
-            ret['pitch_pred'] = pitch_pred = self.pitch_predictor(pitch_pred_inp)
-            if f0 is None:
-                f0 = pitch_pred[:, :, 0]
-            ret['f0_denorm'] = f0_denorm = denorm_f0(f0, None, hparams, pitch_padding=pitch_padding)
-            pitch = f0_to_coarse(f0_denorm)  # start from 0 [B, T_txt]
-            pitch = F.pad(pitch, [1, 0])
-            pitch = torch.gather(pitch, 1, mel2ph)  # [B, T_mel]
-            pitch_embed = self.pitch_embed(pitch)
-            return pitch_embed
+    def add_pitch(self, decoder_inp, f0, uv, mel2ph, ret, encoder_out=None, enable_pitch_flow=False, infer=False, **kwargs):
+
         decoder_inp = decoder_inp.detach() + hparams['predictor_grad'] * (decoder_inp - decoder_inp.detach())
-
         pitch_padding = mel2ph == 0
-
-        if hparams['pitch_type'] == 'cwt':
-            pitch_padding = None
-            ret['cwt'] = cwt_out = self.cwt_predictor(decoder_inp)
-            stats_out = self.cwt_stats_layers(encoder_out[:, 0, :])  # [B, 2]
-            mean = ret['f0_mean'] = stats_out[:, 0]
-            std = ret['f0_std'] = stats_out[:, 1]
-            cwt_spec = cwt_out[:, :, :10]
-            if f0 is None:
-                std = std * hparams['cwt_std_scale']
-                f0 = self.cwt2f0_norm(cwt_spec, mean, std, mel2ph)
-                if hparams['use_uv']:
-                    assert cwt_out.shape[-1] == 11
-                    uv = cwt_out[:, :, -1] > 0
-        elif hparams['pitch_ar']:
-            ret['pitch_pred'] = pitch_pred = self.pitch_predictor(decoder_inp, f0 if self.training else None)
-            if f0 is None:
-                f0 = pitch_pred[:, :, 0]
-        else: # default True
-            ret['pitch_pred'] = pitch_pred = self.pitch_predictor(decoder_inp)
-            if f0 is None:
-                f0 = pitch_pred[:, :, 0]
-            if hparams['use_uv'] and uv is None:
-                uv = pitch_pred[:, :, 1] > 0
+        ret['pitch_pred'] = pitch_pred = self.pitch_predictor(decoder_inp)
+        if f0 is None:
+            f0 = pitch_pred[:, :, 0]
+        if hparams['use_uv'] and uv is None:
+            uv = pitch_pred[:, :, 1] > 0
         ret['f0_denorm'] = f0_denorm = denorm_f0(f0, uv, hparams, pitch_padding=pitch_padding)
         if pitch_padding is not None:
             f0[pitch_padding] = 0
+
+        if kwargs.get('use_f0_flow') is not None and kwargs['use_f0_flow'] is True:
+            if enable_pitch_flow:
+                if infer: # inference stage
+                    z = torch.randn([decoder_inp.shape[0], 1, decoder_inp.shape[1]])
+                    pred_f0_encoding = self.pred_f0_uv_encoder(f0_denorm.transpose(1,2))
+                    decoder_inp = decoder_inp.transpose(1,2)
+                    decoder_inp = torch.cat([decoder_inp, pred_f0_encoding], dim=1)
+                    pred_diff_f0 = self.pitch_flow.infer(z, decoder_inp, spk_emb)
+
+                    f0_denorm = f0_denorm + pred_diff_f0
+                    f0_denorm[uv>0] = 0
+                else:
+                    gt_f0 = f0
+                    gt_uv = uv
+                    gt_f0 = denorm_f0(gt_f0, gt_uv, hparams, pitch_padding=pitch_padding)
+
+                    pred_f0 = pitch_pred[:, :, 0]
+                    pred_uv = pitch_pred[:, :, 1] > 0
+                    pred_f0 = denorm_f0(pred_f0, gt_uv, hparams, pitch_padding=pitch_padding)
+
+                    pred_f0_encoding = self.pred_f0_uv_encoder(pred_f0.transpose(1,2))
+                    decoder_inp = decoder_inp.transpose(1,2)
+                    decoder_inp = torch.cat([decoder_inp, pred_f0_encoding], dim=1)
+
+                    diff_f0 = gt_f0 - pred_f0
+                    lens = pitch_padding.float().sum(dim=-1)
+                    spk_emb = torch.zeros([decoder_inp.shape[0], 0]).to(decoder_inp.device)
+                    ret = self.pitch_flow(decoder_inp, spk_emb, diff_f0, lens)
+                    loss_dict = self.pitch_loss_fn(ret, lens)
+                    loss_f0 = loss_dict['loss_f0'][0]
+                    ret['loss_pitch_flow'] = loss_f0
 
         pitch = f0_to_coarse(f0_denorm)  # start from 0
         pitch_embed = self.pitch_embed(pitch)

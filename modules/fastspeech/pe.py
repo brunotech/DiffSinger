@@ -118,6 +118,10 @@ class ConvStacks(nn.Module):
 
 class PitchExtractor(nn.Module):
     def __init__(self, n_mel_bins=80, conv_layers=2):
+        """
+        output dim = 2
+        第一维表示f0, 是regression loss训练; 第二维是uv, 是cross entropy训练
+        """
         super().__init__()
         self.hidden_size = hparams['hidden_size']
         self.predictor_hidden = hparams['predictor_hidden'] if hparams['predictor_hidden'] > 0 else self.hidden_size

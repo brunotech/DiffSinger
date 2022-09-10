@@ -154,6 +154,8 @@ class BaseTask(nn.Module):
         }
 
     def optimizer_step(self, epoch, batch_idx, optimizer, optimizer_idx):
+        if isinstance(optimizer, list):
+            optimizer = optimizer[optimizer_idx]
         optimizer.step()
         optimizer.zero_grad()
         if self.scheduler is not None:
@@ -201,6 +203,8 @@ class BaseTask(nn.Module):
     def configure_optimizers(self):
         optm = self.build_optimizer(self.model)
         self.scheduler = self.build_scheduler(optm)
+        if isinstance(optm, list):
+            return optm
         return [optm]
 
     def test_start(self):
