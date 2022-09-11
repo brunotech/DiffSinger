@@ -64,4 +64,4 @@ save_gt: true
 
 pitch_flow_training_start: 160000
 use_pitch_flow: true
-max_updates: 320000
+max_updates: 500000

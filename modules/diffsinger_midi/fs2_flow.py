@@ -136,9 +136,9 @@ class FastSpeech2FlowMIDI(FastSpeech2):
         decoder_inp = decoder_inp.detach() + hparams['predictor_grad'] * (decoder_inp - decoder_inp.detach())
         pitch_padding = mel2ph == 0
         ret['pitch_pred'] = pitch_pred = self.pitch_predictor(decoder_inp)
-        if f0 is None:
+        if f0 is None or infer:
             f0 = pitch_pred[:, :, 0]
-        if hparams['use_uv'] and uv is None:
+        if hparams['use_uv'] and (uv is None or infer):
             uv = pitch_pred[:, :, 1] > 0
         ret['f0_denorm'] = f0_denorm = denorm_f0(f0, uv, hparams, pitch_padding=pitch_padding)
         if pitch_padding is not None:
@@ -147,14 +147,18 @@ class FastSpeech2FlowMIDI(FastSpeech2):
         if enable_pitch_flow:
             diff_scale = 200.
             if infer: # inference stage
-                z = torch.randn([decoder_inp.shape[0], 1, decoder_inp.shape[1]])
-                pred_f0_encoding = self.pitch_flow_f0_uv_encoder(f0_denorm.unsqueeze(1))
+                z = torch.randn([decoder_inp.shape[0], 1, decoder_inp.shape[1]]).to(f0.device)
+                pred_pitch = f0_to_coarse(f0_denorm)  # start from 0
+                pred_pitch_embed = self.pitch_embed(pred_pitch)
+                pred_f0_encoding = self.pitch_flow_f0_uv_encoder(pred_pitch_embed.transpose(1,2))
                 decoder_inp = decoder_inp.transpose(1,2)
                 decoder_inp = torch.cat([decoder_inp, pred_f0_encoding], dim=1)
-                pred_diff_f0 = self.pitch_flow.infer(z, decoder_inp, spk_emb)
+                spk_emb = torch.zeros([decoder_inp.shape[0], 0]).to(decoder_inp.device)
+                pred_diff_f0 = self.pitch_flow.infer(z, decoder_inp, spk_emb).squeeze(1)
 
-                f0_denorm = f0_denorm + pred_diff_f0 * diff_scale
-                f0_denorm[uv>0] = 0
+                f0_denorm_refined = f0_denorm + pred_diff_f0 * diff_scale
+                f0_denorm_refined[uv>0] = 0
+                ret['f0_denorm'] = f0_denorm_refined
             else:
                 gt_f0 = f0
                 gt_uv = uv

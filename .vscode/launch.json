@@ -14,7 +14,7 @@
             "python": "/home/yezhenhui/anaconda3/envs/diffspeech/bin/python",
             "env": {
                 "PYTHONPATH": "/home/yezhenhui/projects/DiffSinger",
-                "CUDA_VISIBLE_DEVICES": "0"
+                "CUDA_VISIBLE_DEVICES": "1"
             },
             "cwd": "/home/yezhenhui/projects/DiffSinger",
             "args": [

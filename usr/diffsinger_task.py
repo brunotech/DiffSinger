@@ -16,6 +16,8 @@ from modules.fastspeech.tts_modules import mel2ph_to_dur
 
 from usr.diff.candidate_decoder import FFT
 from utils.pitch_utils import denorm_f0
+from utils.plot import spec_to_figure, dur_to_figure, f0_to_figure
+
 from tasks.tts.fs2_utils import FastSpeechDataset
 from tasks.tts.fs2 import FastSpeech2Task
 
@@ -529,7 +531,7 @@ class AuxDecoderFlowMIDITask(FastSpeech2Task):
     def build_scheduler(self, optimizer):
         return RSQRTSchedule(optimizer[0])
 
-    def run_model(self, model, sample, return_output=False, enable_pitch_flow=False):
+    def run_model(self, model, sample, return_output=False, enable_pitch_flow=False, infer=False):
         txt_tokens = sample['txt_tokens']  # [B, T_t]
         target = sample['mels']  # [B, T_s, 80]
         mel2ph = sample['mel2ph']  # [B, T_s]
@@ -545,11 +547,11 @@ class AuxDecoderFlowMIDITask(FastSpeech2Task):
             sample['f0_cwt'] = f0 = model.cwt2f0_norm(cwt_spec, f0_mean, f0_std, mel2ph)
 
         output = model(txt_tokens, mel2ph=mel2ph, spk_embed=spk_embed,
-                       ref_mels=target, f0=f0, uv=uv, energy=energy, infer=False, pitch_midi=sample['pitch_midi'],
+                       ref_mels=target, f0=f0, uv=uv, energy=energy, infer=infer, pitch_midi=sample['pitch_midi'],
                        midi_dur=sample.get('midi_dur'), is_slur=sample.get('is_slur'), enable_pitch_flow=enable_pitch_flow)
 
         losses = {}
-        if enable_pitch_flow:
+        if enable_pitch_flow and not infer:
             losses['loss_pitch_flow'] = output['loss_pitch_flow']
         else:
             self.add_mel_loss(output['mel_out'], target, losses)
@@ -613,9 +615,15 @@ class AuxDecoderFlowMIDITask(FastSpeech2Task):
         return total_loss, loss_output
 
     def validation_step(self, sample, batch_idx):
+        enable_pitch_flow = self.global_step >= hparams['pitch_flow_training_start'] + 1
+        # enable_pitch_flow = self.global_step >= hparams['pitch_flow_training_start'] + 1000
+
         outputs = {}
         outputs['losses'] = {}
-        outputs['losses'], model_out = self.run_model(self.model, sample, return_output=True)
+        if batch_idx < hparams['num_valid_plots']:
+            outputs['losses'], model_out = self.run_model(self.model, sample, return_output=True, infer=True, enable_pitch_flow=enable_pitch_flow)
+        else:
+            outputs['losses'], model_out = self.run_model(self.model, sample, return_output=True, infer=False, enable_pitch_flow=enable_pitch_flow)
         outputs['total_loss'] = sum(outputs['losses'].values())
         outputs['nsamples'] = sample['nsamples']
         mel_out = self.model.out2mel(model_out['mel_out'])
@@ -663,3 +671,16 @@ class AuxDecoderFlowMIDITask(FastSpeech2Task):
                 sample['f0'] = denorm_f0(sample['f0'], sample['uv'], hparams)
                 sample['f0_pred'] = outputs.get('f0_denorm')
             return self.after_infer(sample)
+
+
+    def plot_pitch(self, batch_idx, sample, model_out):
+        f0 = sample['f0']
+        f0 = denorm_f0(f0, sample['uv'], hparams)
+
+        # f0
+        uv_pred = model_out['pitch_pred'][:, :, 1] > 0
+        pitch_pred = denorm_f0(model_out['pitch_pred'][:, :, 0], uv_pred, hparams)
+        self.logger.experiment.add_figure(
+            f'f0_{batch_idx}', f0_to_figure(f0[0], None, pitch_pred[0]), self.global_step)
+        self.logger.experiment.add_figure(
+            f'refined_f0_{batch_idx}', f0_to_figure(f0[0], None, model_out['f0_denorm'][0]), self.global_step)
