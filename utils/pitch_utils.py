@@ -31,7 +31,7 @@ def f0_to_coarse(f0): # discretize the f0 into [0,255] ints
     return f0_coarse
 
 
-def norm_f0(f0, uv, hparams):
+def norm_f0(f0, uv, hparams, pitch_padding=None):
     is_torch = isinstance(f0, torch.Tensor)
     if hparams['pitch_norm'] == 'standard':
         f0 = (f0 - hparams['f0_mean']) / hparams['f0_std']
@@ -39,6 +39,9 @@ def norm_f0(f0, uv, hparams):
         f0 = torch.log2(f0) if is_torch else np.log2(f0)
     if uv is not None and hparams['use_uv']:
         f0[uv > 0] = 0
+    
+    if pitch_padding is not None:
+        f0[pitch_padding] = 0
     return f0
 
 

@@ -97,10 +97,12 @@ class FastSpeech2FlowTask(TtsTask):
             return [self.optimizer]
 
     def _training_step(self, sample, batch_idx, opt_idx):
-        training_pitch_flow = self.global_step >= hparams['pitch_flow_training_start'] and hparams['use_pitch_flow']
-        if ((opt_idx == 0 and training_pitch_flow) or (opt_idx == 1 and not training_pitch_flow)):
-            return None
-        loss_output = self.run_model(self.model, sample, forward_pitch_flow=training_pitch_flow)
+        if hparams['two_stage']:
+            training_pitch_flow = self.global_step >= hparams['pitch_flow_training_start'] and hparams['use_pitch_flow']
+            if ((opt_idx == 0 and training_pitch_flow) or (opt_idx == 1 and not training_pitch_flow)):
+                return None
+            loss_output = self.run_model(self.model, sample, forward_pitch_flow=training_pitch_flow)
+        
         total_loss = sum([v for v in loss_output.values() if isinstance(v, torch.Tensor) and v.requires_grad])
         loss_output['batch_size'] = sample['txt_tokens'].size()[0]
         return total_loss, loss_output
@@ -153,15 +155,15 @@ class FastSpeech2FlowTask(TtsTask):
                        ref_mels=target, f0=f0, uv=uv, energy=energy, infer=infer, enable_pitch_flow=enable_pitch_flow)
 
         losses = {}
+        self.add_mel_loss(output['mel_out'], target, losses)
+        self.add_dur_loss(output['dur'], mel2ph, txt_tokens, losses=losses)
+        if hparams['use_pitch_embed']:
+            self.add_pitch_loss(output, sample, losses)
+        if hparams['use_energy_embed']:
+            self.add_energy_loss(output['energy_pred'], energy, losses)
         if enable_pitch_flow:
             losses['loss_pitch_flow'] = output['loss_pitch_flow']
-        else:
-            self.add_mel_loss(output['mel_out'], target, losses)
-            self.add_dur_loss(output['dur'], mel2ph, txt_tokens, losses=losses)
-            if hparams['use_pitch_embed']:
-                self.add_pitch_loss(output, sample, losses)
-            if hparams['use_energy_embed']:
-                self.add_energy_loss(output['energy_pred'], energy, losses)
+
         if not return_output:
             return losses
         else:

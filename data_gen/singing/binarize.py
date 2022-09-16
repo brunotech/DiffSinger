@@ -15,6 +15,7 @@ import librosa
 from scipy.interpolate import interp1d
 import torch
 from textgrid import TextGrid
+import librosa
 
 from utils.hparams import hparams
 from data_gen.tts.data_gen_utils import build_phone_encoder, get_pitch
@@ -254,6 +255,17 @@ class MidiSingingBinarizer(SingingBinarizer):
         res['mel2ph'] = mel2ph
         # res['dur'] = None
 
+        pitch_midi = res['pitch_midi']
+        mel2f0_midi = mel2ph * 0
+        for i in range(len(mel2ph)):
+            if mel2ph[i] == 0:
+                mel2f0_midi[i] = 0
+            ph_idx = mel2ph[i] - 1
+            cur_midi = pitch_midi[ph_idx]
+            f0_midi = librosa.midi_to_hz(cur_midi)
+            mel2f0_midi[i] = f0_midi
+        res['mel2f0_midi'] = mel2f0_midi
+        
     @classmethod
     def process_item(cls, item_name, ph, txt, tg_fn, wav_fn, spk_id, encoder, binarization_args):
         if hparams['vocoder'] in VOCODERS:

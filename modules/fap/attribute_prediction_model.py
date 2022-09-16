@@ -26,6 +26,29 @@ from modules.fap.common import ConvLSTMLinear
 from modules.fap.transformer import FFTransformer
 from modules.fap.autoregressive_flow import AR_Step, AR_Back_Step
 
+
+bgap_f0_model_config= {
+    "name": "bgap",
+    "hparams": {
+        "n_in_dim": 2,
+        "take_log_of_input": False,
+        "n_speaker_dim": 16,
+        "n_flows": 6,
+        "n_group_size": 2,
+        "n_layers": 4,
+        "kernel_size": 5,
+        "scaling_fn": "tanh",
+        "with_dilation": True,
+		"bottleneck_hparams": {
+                    "in_dim": 512,
+                    "reduction_factor": 16,
+                    "norm": "weightnorm",
+                    "non_linearity": "leakyrelu",
+		    "use_partial_padding": True,
+		    "kernel_size": 1
+        }       
+    }
+}
 f0_model_config =  {
     "name": "agap",
     "hparams": {

@@ -82,8 +82,10 @@ class AttributePredictionLoss(torch.nn.Module):
         if 'n_group_size' in model_config['hparams']:
             self.n_group_size = model_config['hparams']['n_group_size']
 
-    def forward(self, model_output, lens):
+    def forward(self, model_output, lens, uv=None):
         mask = get_mask_from_lengths(lens // self.n_group_size)
+        if uv is not None:
+            mask = torch.bitwise_and(mask.bool(), ~uv.bool())
         mask = mask[:, None].float()
         loss_dict = {}
         if 'z' in model_output:

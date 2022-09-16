@@ -701,7 +701,10 @@ class BaseTrainer:
         for optimizer, opt_state in zip(self.optimizers, optimizer_states):
             if optimizer is None:
                 return
-            optimizer.load_state_dict(opt_state)
+            try:
+                optimizer.load_state_dict(opt_state)
+            except:
+                print("Warning: optim state load failed!")
 
             # move optimizer to GPU 1 weight at a time
             # avoids OOM

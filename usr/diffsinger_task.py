@@ -264,11 +264,14 @@ class OpencpopDataset(FastSpeechDataset):
         sample['midi_dur'] = torch.FloatTensor(item['midi_dur'])[:hparams['max_frames']]
         sample['is_slur'] = torch.LongTensor(item['is_slur'])[:hparams['max_frames']]
         sample['word_boundary'] = torch.LongTensor(item['word_boundary'])[:hparams['max_frames']]
+        sample['mel2f0_midi'] = torch.LongTensor(item['mel2f0_midi'])[:hparams['max_frames']]
+        
         return sample
 
     def collater(self, samples):
         batch = super(OpencpopDataset, self).collater(samples)
         batch['pitch_midi'] = utils.collate_1d([s['pitch_midi'] for s in samples], 0)
+        batch['mel2f0_midi'] = utils.collate_1d([s['mel2f0_midi'] for s in samples], 0)
         batch['midi_dur'] = utils.collate_1d([s['midi_dur'] for s in samples], 0)
         batch['is_slur'] = utils.collate_1d([s['is_slur'] for s in samples], 0)
         batch['word_boundary'] = utils.collate_1d([s['word_boundary'] for s in samples], 0)
@@ -508,7 +511,7 @@ class AuxDecoderFlowMIDITask(FastSpeech2Task):
             self.model = FastSpeech2(self.phone_encoder)
 
     def build_optimizer(self, model):
-        if hparams['use_pitch_flow']:
+        if hparams['two_stage']:
             self.optimizer = torch.optim.AdamW(
                 [p for name, p in self.model.named_parameters() if 'pitch_flow' not in name],
                 lr=hparams['lr'],
@@ -516,9 +519,10 @@ class AuxDecoderFlowMIDITask(FastSpeech2Task):
                 weight_decay=hparams['weight_decay'])
             self.pitch_flow_optimizer = torch.optim.AdamW(
                 [p for name, p in self.model.named_parameters() if 'pitch_flow' in name],
-                lr=0.001,
+                lr=0.0001,
                 betas=(hparams['optimizer_adam_beta1'], hparams['optimizer_adam_beta2']),
-                weight_decay=0.)
+                weight_decay=1e-6)
+                # weight_decay=0.)
             return [self.optimizer, self.pitch_flow_optimizer]
         else:
             self.optimizer = torch.optim.AdamW(
@@ -548,18 +552,18 @@ class AuxDecoderFlowMIDITask(FastSpeech2Task):
 
         output = model(txt_tokens, mel2ph=mel2ph, spk_embed=spk_embed,
                        ref_mels=target, f0=f0, uv=uv, energy=energy, infer=infer, pitch_midi=sample['pitch_midi'],
-                       midi_dur=sample.get('midi_dur'), is_slur=sample.get('is_slur'), enable_pitch_flow=enable_pitch_flow)
+                       midi_dur=sample.get('midi_dur'), is_slur=sample.get('is_slur'), enable_pitch_flow=enable_pitch_flow,
+                       mel2f0_midi=sample['mel2f0_midi'])
 
         losses = {}
         if enable_pitch_flow and not infer:
             losses['loss_pitch_flow'] = output['loss_pitch_flow']
-        else:
-            self.add_mel_loss(output['mel_out'], target, losses)
-            self.add_dur_loss(output['dur'], mel2ph, txt_tokens, sample['word_boundary'], losses=losses)
-            if hparams['use_pitch_embed']:
-                self.add_pitch_loss(output, sample, losses)
-            if hparams['use_energy_embed']:
-                self.add_energy_loss(output['energy_pred'], energy, losses)
+        self.add_mel_loss(output['mel_out'], target, losses)
+        self.add_dur_loss(output['dur'], mel2ph, txt_tokens, sample['word_boundary'], losses=losses)
+        if hparams['use_pitch_embed']:
+            self.add_pitch_loss(output, sample, losses)
+        if hparams['use_energy_embed']:
+            self.add_energy_loss(output['energy_pred'], energy, losses)
         if not return_output:
             return losses
         else:
@@ -606,10 +610,14 @@ class AuxDecoderFlowMIDITask(FastSpeech2Task):
             losses['sdur'] = sdur_loss.mean() * hparams['lambda_sent_dur']
     
     def _training_step(self, sample, batch_idx, opt_idx):
-        training_pitch_flow = self.global_step >= hparams['pitch_flow_training_start']
-        if ((opt_idx == 0 and training_pitch_flow) or (opt_idx == 1 and not training_pitch_flow)):
-            return None
-        loss_output = self.run_model(self.model, sample, enable_pitch_flow=training_pitch_flow)
+        if hparams['two_stage']:
+            training_pitch_flow = self.global_step >= hparams['pitch_flow_training_start']
+            if ((opt_idx == 0 and training_pitch_flow) or (opt_idx == 1 and not training_pitch_flow)):
+                return None
+            loss_output = self.run_model(self.model, sample, enable_pitch_flow=training_pitch_flow)
+        else:
+            assert opt_idx == 0
+            loss_output = self.run_model(self.model, sample, enable_pitch_flow=True)
         total_loss = sum([v for v in loss_output.values() if isinstance(v, torch.Tensor) and v.requires_grad])
         loss_output['batch_size'] = sample['txt_tokens'].size()[0]
         return total_loss, loss_output
@@ -674,6 +682,23 @@ class AuxDecoderFlowMIDITask(FastSpeech2Task):
 
 
     def plot_pitch(self, batch_idx, sample, model_out):
+        def f0_to_figure(f0_gt, f0_cwt=None, f0_pred=None, f0_refined=None):
+            import matplotlib.pyplot as plt
+            fig = plt.figure()
+            f0_gt = f0_gt.cpu().numpy()
+            plt.plot(f0_gt, color='r', label='gt')
+            if f0_cwt is not None:
+                f0_cwt = f0_cwt.cpu().numpy()
+                plt.plot(f0_cwt, color='b', label='cwt')
+            if f0_pred is not None:
+                f0_pred = f0_pred.cpu().numpy()
+                plt.plot(f0_pred, color='green', label='pred')
+            
+            if f0_refined is not None: 
+                f0_refined = f0_refined.cpu().numpy()
+                plt.plot(f0_refined, color='blue', label='refined')
+            plt.legend()
+            return fig
         f0 = sample['f0']
         f0 = denorm_f0(f0, sample['uv'], hparams)
 
@@ -683,4 +708,4 @@ class AuxDecoderFlowMIDITask(FastSpeech2Task):
         self.logger.experiment.add_figure(
             f'f0_{batch_idx}', f0_to_figure(f0[0], None, pitch_pred[0]), self.global_step)
         self.logger.experiment.add_figure(
-            f'refined_f0_{batch_idx}', f0_to_figure(f0[0], None, model_out['f0_denorm'][0]), self.global_step)
+            f'refined_f0_{batch_idx}', f0_to_figure(f0[0], None, pitch_pred[0], model_out['f0_denorm'][0]), self.global_step)

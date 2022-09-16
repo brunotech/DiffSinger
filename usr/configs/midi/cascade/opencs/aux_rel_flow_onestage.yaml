@@ -63,7 +63,8 @@ num_valid_plots: 10
 save_gt: true
 
 pitch_flow_training_start: 0
-two_stage: true
+use_pitch_flow: true
 max_updates: 500000
 num_ckpt_keep: 3
-max_tokens: 40000
+max_tokens: 28000
+two_stage: false

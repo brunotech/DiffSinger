@@ -8,7 +8,8 @@ from utils.pitch_utils import f0_to_coarse, denorm_f0, norm_f0
 from modules.fastspeech.fs2 import FastSpeech2
 
 
-from modules.fap.attribute_prediction_model import AGAP, f0_model_config
+from modules.fap.attribute_prediction_model import AGAP, f0_model_config, BGAP
+from modules.fap.common import LinearNorm
 from modules.fap.loss import AttributePredictionLoss
 
 
@@ -64,7 +65,15 @@ class FastSpeech2FlowMIDI(FastSpeech2):
             ])
             f0_model_config['hparams']['bottleneck_hparams']['in_dim'] = self.hidden_size + 64
             self.pitch_flow = AGAP(**f0_model_config['hparams'])
+            # self.pitch_flow = BGAP(**f0_model_config['hparams'])
             self.pitch_loss_fn = AttributePredictionLoss("f0", f0_model_config, 1.0)
+            self.pitch_flow_uv_bias_encoder = nn.Sequential(*[
+                LinearNorm(self.hidden_size + 64, 1), 
+                # nn.ReLU()
+                nn.Sigmoid()
+            ])
+            for p in self.pitch_flow_uv_bias_encoder.parameters():
+                p.requires_grad = False
 
     def forward(self, txt_tokens, mel2ph=None, spk_embed=None,
                 ref_mels=None, f0=None, uv=None, energy=None, skip_decoder=False,
@@ -119,7 +128,7 @@ class FastSpeech2FlowMIDI(FastSpeech2):
         pitch_inp = (decoder_inp_origin + var_embed + spk_embed_f0) * tgt_nonpadding
         if hparams['use_pitch_embed']:
             pitch_inp_ph = (encoder_out + var_embed + spk_embed_f0) * src_nonpadding
-            decoder_inp = decoder_inp + self.add_pitch(pitch_inp, f0, uv, mel2ph, ret, encoder_out=pitch_inp_ph, infer=infer, enable_pitch_flow=enable_pitch_flow)
+            decoder_inp = decoder_inp + self.add_pitch(pitch_inp, f0, uv, mel2ph, ret, encoder_out=pitch_inp_ph, infer=infer, enable_pitch_flow=enable_pitch_flow, mel2f0_midi=kwargs['mel2f0_midi'])
         if hparams['use_energy_embed']:
             decoder_inp = decoder_inp + self.add_energy(pitch_inp, energy, ret)
 
@@ -145,19 +154,25 @@ class FastSpeech2FlowMIDI(FastSpeech2):
             f0[pitch_padding] = 0
 
         if enable_pitch_flow:
-            diff_scale = 200.
+            diff_scale = 3.
+            # diff_scale = 5.
+            sigma_f0 = 0.3
             if infer: # inference stage
-                z = torch.randn([decoder_inp.shape[0], 1, decoder_inp.shape[1]]).to(f0.device)
+                z = torch.randn([decoder_inp.shape[0], 1, decoder_inp.shape[1]]).to(f0.device) * sigma_f0
                 pred_pitch = f0_to_coarse(f0_denorm)  # start from 0
                 pred_pitch_embed = self.pitch_embed(pred_pitch)
                 pred_f0_encoding = self.pitch_flow_f0_uv_encoder(pred_pitch_embed.transpose(1,2))
                 decoder_inp = decoder_inp.transpose(1,2)
                 decoder_inp = torch.cat([decoder_inp, pred_f0_encoding], dim=1)
                 spk_emb = torch.zeros([decoder_inp.shape[0], 0]).to(decoder_inp.device)
-                pred_diff_f0 = self.pitch_flow.infer(z, decoder_inp, spk_emb).squeeze(1)
+                pred_sample = self.pitch_flow.infer(z, decoder_inp, spk_emb).squeeze(1)
 
-                f0_denorm_refined = f0_denorm + pred_diff_f0 * diff_scale
-                f0_denorm_refined[uv>0] = 0
+                if hparams.get("fit_midi_f0") is not None and hparams['fit_midi_f0'] is True:
+                    mel2f0_midi = kwargs['mel2f0_midi']
+                    f0_refined = denorm_f0(pred_sample * diff_scale, uv, hparams, pitch_padding=pitch_padding) 
+                    f0_denorm_refined = mel2f0_midi + f0_refined
+                else:
+                    f0_denorm_refined = denorm_f0(pred_sample * diff_scale, uv, hparams, pitch_padding=pitch_padding)
                 ret['f0_denorm'] = f0_denorm_refined
             else:
                 gt_f0 = f0
@@ -167,6 +182,7 @@ class FastSpeech2FlowMIDI(FastSpeech2):
                 pred_f0 = pitch_pred[:, :, 0]
                 pred_uv = pitch_pred[:, :, 1] > 0
                 pred_f0 = denorm_f0(pred_f0, gt_uv, hparams, pitch_padding=pitch_padding)
+                
                 pred_pitch = f0_to_coarse(pred_f0)  # start from 0
                 pred_pitch_embed = self.pitch_embed(pred_pitch)
 
@@ -174,14 +190,29 @@ class FastSpeech2FlowMIDI(FastSpeech2):
                 decoder_inp = decoder_inp.transpose(1,2)
                 decoder_inp = torch.cat([decoder_inp, pred_f0_encoding], dim=1)
 
-                diff_f0 = gt_f0 - pred_f0
-                diff_f0 = diff_f0 / diff_scale
+                if hparams.get("fit_midi_f0") is not None and hparams['fit_midi_f0'] is True:
+                    mel2f0_midi = kwargs['mel2f0_midi']
+                    gt_sample = gt_f0 - mel2f0_midi
+                    gt_sample[uv>0] = 0
+                    # mask_2 = 
+                    gt_sample = norm_f0(gt_sample, gt_uv, hparams, pitch_padding=pitch_padding) / diff_scale
+                else:
+                    gt_sample = norm_f0(gt_f0, gt_uv, hparams, pitch_padding=pitch_padding) / diff_scale
+
+                # todo: gt_f0 - gt_midi, mask offset 50hz # librosa
+                with torch.no_grad():
+                    f0_uv_bias = self.pitch_flow_uv_bias_encoder(decoder_inp.transpose(1,2))
+                    f0_uv_bias = - f0_uv_bias[..., 0]
+                    zero_mask = torch.bitwise_or(uv<=0, pitch_padding)
+                    f0_uv_bias[zero_mask] = 0
+                    gt_sample = gt_sample + f0_uv_bias
+
                 lens = (mel2ph != 0).long().sum(dim=-1)
                 if lens[-1] < mel2ph.shape[-1]:
                     lens[-1] = mel2ph.shape[-1] # lens_max must match the mel dim 
                 spk_emb = torch.zeros([decoder_inp.shape[0], 0]).to(decoder_inp.device)
-                pitch_flow_ret = self.pitch_flow(decoder_inp, spk_emb, diff_f0, lens)
-                loss_dict = self.pitch_loss_fn(pitch_flow_ret, lens)
+                pitch_flow_ret = self.pitch_flow(decoder_inp, spk_emb, gt_sample, lens)
+                loss_dict = self.pitch_loss_fn(pitch_flow_ret, lens, uv=None) # todo: 看看不mask会不会更好
                 ret['loss_pitch_flow'] = loss_dict['loss_f0'][0]
 
         pitch = f0_to_coarse(f0_denorm)  # start from 0

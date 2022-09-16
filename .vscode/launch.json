@@ -14,12 +14,12 @@
             "python": "/home/yezhenhui/anaconda3/envs/diffspeech/bin/python",
             "env": {
                 "PYTHONPATH": "/home/yezhenhui/projects/DiffSinger",
-                "CUDA_VISIBLE_DEVICES": "1"
+                "CUDA_VISIBLE_DEVICES": "0"
             },
             "cwd": "/home/yezhenhui/projects/DiffSinger",
             "args": [
                 "--config", "usr/configs/midi/cascade/opencs/aux_rel_flow.yaml",
-                "--exp_name", "0910_opencpop_fs_flow_midi",
+                "--exp_name", "test",
                 "--reset"
             ]
         }
