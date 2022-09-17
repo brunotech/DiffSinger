@@ -18,9 +18,10 @@
             },
             "cwd": "/home/yezhenhui/projects/DiffSinger",
             "args": [
-                "--config", "usr/configs/midi/cascade/opencs/aux_rel_diffusion.yaml",
-                "--exp_name", "0916_opencpop_fs_diffusion_diff_midi",
-                "--reset"
+                "--config", "checkpoints/0303_opencpop_ds58_midi/config.yaml",
+                "--exp_name", "0303_opencpop_ds58_midi",
+                // "--reset", 
+                "--infer"
             ]
         }
     ]

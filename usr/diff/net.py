@@ -79,15 +79,17 @@ class ResidualBlock(nn.Module):
 
 
 class DiffNet(nn.Module):
-    def __init__(self, in_dims=80):
+    def __init__(self, in_dims=80, encoder_hidden=None):
         super().__init__()
         self.params = params = AttrDict(
             # Model params
-            encoder_hidden=hparams['hidden_size']+ 64,
+            encoder_hidden=hparams['hidden_size'],
             residual_layers=hparams['residual_layers'],
             residual_channels=hparams['residual_channels'] ,
             dilation_cycle_length=hparams['dilation_cycle_length'],
         )
+        if encoder_hidden is not None:
+            self.params['encoder_hidden'] = encoder_hidden
         self.input_projection = Conv1d(in_dims, params.residual_channels, 1)
         self.diffusion_embedding = SinusoidalPosEmb(params.residual_channels)
         dim = params.residual_channels

@@ -66,7 +66,7 @@ class FastSpeech2DiffusionMIDI(FastSpeech2):
                 nn.Conv1d(64, 64, kernel_size=3, stride=1, padding=1, dilation=1),
             ])
             f0_model_config['hparams']['bottleneck_hparams']['in_dim'] = self.hidden_size + 64
-            self.pitch_flow_diffnet = DiffNet(in_dims=1)
+            self.pitch_flow_diffnet = DiffNet(in_dims=1, encoder_hidden=hparams['hidden_size']+64)
             self.pitch_flow = GaussianDiffusion(out_dims=1, denoise_fn=self.pitch_flow_diffnet, timesteps=100)
             # self.pitch_flow = BGAP(**f0_model_config['hparams'])
             self.pitch_loss_fn = AttributePredictionLoss("f0", f0_model_config, 1.0)
@@ -131,7 +131,7 @@ class FastSpeech2DiffusionMIDI(FastSpeech2):
         pitch_inp = (decoder_inp_origin + var_embed + spk_embed_f0) * tgt_nonpadding
         if hparams['use_pitch_embed']:
             pitch_inp_ph = (encoder_out + var_embed + spk_embed_f0) * src_nonpadding
-            decoder_inp = decoder_inp + self.add_pitch(pitch_inp, f0, uv, mel2ph, ret, encoder_out=pitch_inp_ph, infer=infer, enable_pitch_flow=enable_pitch_flow, mel2f0_midi=kwargs['mel2f0_midi'])
+            decoder_inp = decoder_inp + self.add_pitch(pitch_inp, f0, uv, mel2ph, ret, encoder_out=pitch_inp_ph, infer=infer, enable_pitch_flow=enable_pitch_flow)
         if hparams['use_energy_embed']:
             decoder_inp = decoder_inp + self.add_energy(pitch_inp, energy, ret)
 

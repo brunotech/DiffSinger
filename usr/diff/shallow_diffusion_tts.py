@@ -12,6 +12,9 @@ from einops import rearrange
 
 from modules.fastspeech.fs2 import FastSpeech2
 from modules.diffsinger_midi.fs2 import FastSpeech2MIDI
+from modules.diffsinger_midi.fs2_flow import FastSpeech2FlowMIDI
+from modules.diffsinger_midi.fs2_diffusion import FastSpeech2DiffusionMIDI
+
 from utils.hparams import hparams
 
 
@@ -73,7 +76,14 @@ class GaussianDiffusion(nn.Module):
         super().__init__()
         self.denoise_fn = denoise_fn
         if hparams.get('use_midi') is not None and hparams['use_midi']:
-            self.fs2 = FastSpeech2MIDI(phone_encoder, out_dims)
+            ap_type = hparams.get("ap_type", "mse")
+            if ap_type == 'mse':
+                self.fs2 = FastSpeech2MIDI(phone_encoder, out_dims)
+            elif ap_type == 'flow':
+                self.fs2 = FastSpeech2FlowMIDI(phone_encoder, out_dims)
+            elif ap_type == 'diffusion':
+                self.fs2 = FastSpeech2DiffusionMIDI(phone_encoder, out_dims)
+
         else:
             self.fs2 = FastSpeech2(phone_encoder, out_dims)
         self.mel_bins = out_dims
