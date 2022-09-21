@@ -506,6 +506,7 @@ class DiffSingerMIDITask(DiffSingerTask):
                 if f0_pred_mse is not None:
                     plt.plot(f0_pred_mse, label='f0_pred_mse')
                 plt.plot(f0_pred_gen, label='f0_pred_gen')
+                plt.plot(predictions[0]['mel2f0_midi'], label='f0_midi')
                 plt.legend()
                 plt.tight_layout()
                 plt.savefig(f'{gen_dir}/plot/[F0][{item_name}]{text}.png', format='png')

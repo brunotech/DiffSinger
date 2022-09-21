@@ -5,7 +5,28 @@
     "version": "0.2.0",
     "configurations": [
         {
-            "name": "Python: Current File",
+            "name": "Python: Train",
+            "type": "python",
+            "request": "launch",
+            "program": "${file}",
+            "console": "integratedTerminal",
+            "justMyCode": true,
+            "python": "/home/yezhenhui/anaconda3/envs/diffspeech/bin/python",
+            "env": {
+                "PYTHONPATH": "/home/yezhenhui/projects/DiffSinger",
+                "CUDA_VISIBLE_DEVICES": "1"
+            },
+            "cwd": "/home/yezhenhui/projects/DiffSinger",
+            "args": [
+                "--config", "usr/configs/midi/cascade/opencs/ds1000_rel_pndm.yaml",
+                "--exp_name", "test",
+                "--reset", 
+                // "--infer"
+            ]
+        }
+        ,
+        {
+            "name": "Python: Infer",
             "type": "python",
             "request": "launch",
             "program": "${file}",
