@@ -13,7 +13,8 @@ from modules.fap.attribute_prediction_model import AGAP, f0_model_config, BGAP
 from modules.fap.common import LinearNorm
 from modules.fap.loss import AttributePredictionLoss
 from modules.diffsinger_midi.diffusion import GaussianDiffusion
- 
+from copy import deepcopy
+
 
 class FastspeechMIDIEncoder(FastspeechEncoder):
     def forward_embedding(self, txt_tokens, midi_embedding, midi_dur_embedding, slur_embedding):
@@ -65,7 +66,7 @@ class FastSpeech2DiffusionMIDI(FastSpeech2):
                 nn.Conv1d(64, 64, kernel_size=3, stride=1, padding=1, dilation=1),
             ])
             f0_model_config['hparams']['bottleneck_hparams']['in_dim'] = self.hidden_size + 64
-            self.pitch_flow_diffnet = DiffNet(in_dims=1)
+            self.pitch_flow_diffnet = DiffNet(in_dims=1, encoder_hidden=hparams['hidden_size'] + 64)
             self.pitch_flow = GaussianDiffusion(out_dims=1, denoise_fn=self.pitch_flow_diffnet, timesteps=100)
             # self.pitch_flow = BGAP(**f0_model_config['hparams'])
             self.pitch_loss_fn = AttributePredictionLoss("f0", f0_model_config, 1.0)
@@ -130,7 +131,7 @@ class FastSpeech2DiffusionMIDI(FastSpeech2):
         pitch_inp = (decoder_inp_origin + var_embed + spk_embed_f0) * tgt_nonpadding
         if hparams['use_pitch_embed']:
             pitch_inp_ph = (encoder_out + var_embed + spk_embed_f0) * src_nonpadding
-            decoder_inp = decoder_inp + self.add_pitch(pitch_inp, f0, uv, mel2ph, ret, encoder_out=pitch_inp_ph, infer=infer, enable_pitch_flow=enable_pitch_flow, mel2f0_midi=kwargs['mel2f0_midi'])
+            decoder_inp = decoder_inp + self.add_pitch(pitch_inp, f0, uv, mel2ph, ret, encoder_out=pitch_inp_ph, infer=infer, enable_pitch_flow=enable_pitch_flow)
         if hparams['use_energy_embed']:
             decoder_inp = decoder_inp + self.add_energy(pitch_inp, energy, ret)
 
@@ -152,15 +153,33 @@ class FastSpeech2DiffusionMIDI(FastSpeech2):
         if hparams['use_uv'] and (uv is None or infer):
             uv = pitch_pred[:, :, 1] > 0
         ret['f0_denorm'] = f0_denorm = denorm_f0(f0, uv, hparams, pitch_padding=pitch_padding)
+        ret['f0_denorm_mse'] = f0_denorm
+        
         if pitch_padding is not None:
             f0[pitch_padding] = 0
 
         if enable_pitch_flow:
-            diff_scale = 3.
+            def norm_fn(x, uv, pitch_padding):
+                y = deepcopy(x)
+                mask = x >= 0
+                y[mask] = torch.log(x[mask]+1)
+                mask = x < 0
+                y[mask] = -torch.log(-x[mask]+1)
+                y[uv>0] = 0
+                y[pitch_padding] = 0
+                return y
+            def denorm_fn(y, uv, pitch_padding):
+                x = deepcopy(y)
+                mask = y >= 0
+                x[mask] = torch.exp(y[mask])-1
+                mask = y < 0
+                x[mask] = -torch.exp(-y[mask])+1
+                x[uv>0] = 0
+                x[pitch_padding] = 0
+                return x
+            diff_scale = 1.5
             # diff_scale = 5.
-            sigma_f0 = 0.3
             if infer: # inference stage
-                z = torch.randn([decoder_inp.shape[0], 1, decoder_inp.shape[1]]).to(f0.device) * sigma_f0
                 pred_pitch = f0_to_coarse(f0_denorm)  # start from 0
                 pred_pitch_embed = self.pitch_embed(pred_pitch)
                 pred_f0_encoding = self.pitch_flow_f0_uv_encoder(pred_pitch_embed.transpose(1,2))
@@ -168,7 +187,7 @@ class FastSpeech2DiffusionMIDI(FastSpeech2):
                 decoder_inp = torch.cat([decoder_inp, pred_f0_encoding], dim=1)
                 spk_emb = torch.zeros([decoder_inp.shape[0], 0]).to(decoder_inp.device)
                 pitch_flow_ret = self.pitch_flow(decoder_inp, ret={}, infer=True)
-                pred_sample = pitch_flow_ret['f0_out']
+                pred_sample = pitch_flow_ret['f0_out'].squeeze(-1)
                 
                 if hparams.get("fit_midi_f0") is not None and hparams['fit_midi_f0'] is True:
                     mel2f0_midi = kwargs['mel2f0_midi']
@@ -176,6 +195,8 @@ class FastSpeech2DiffusionMIDI(FastSpeech2):
                     f0_denorm_refined = mel2f0_midi + f0_refined
                 else:
                     f0_denorm_refined = denorm_f0(pred_sample * diff_scale, uv, hparams, pitch_padding=pitch_padding)
+                    f0_denorm_refined = f0_denorm_refined + f0_denorm
+
                 ret['f0_denorm'] = f0_denorm_refined
             else:
                 gt_f0 = f0
@@ -200,7 +221,8 @@ class FastSpeech2DiffusionMIDI(FastSpeech2):
                     # mask_2 = 
                     gt_sample = norm_f0(gt_sample, gt_uv, hparams, pitch_padding=pitch_padding) / diff_scale
                 else:
-                    gt_sample = norm_f0(gt_f0, gt_uv, hparams, pitch_padding=pitch_padding) / diff_scale
+                    gt_sample = gt_f0 - pred_f0
+                    gt_sample = norm_fn(gt_sample, uv, pitch_padding) / diff_scale
 
                 # todo: gt_f0 - gt_midi, mask offset 50hz # librosa
                 with torch.no_grad():

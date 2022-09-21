@@ -149,6 +149,8 @@ class FastSpeech2FlowMIDI(FastSpeech2):
         if hparams['use_uv'] and (uv is None or infer):
             uv = pitch_pred[:, :, 1] > 0
         ret['f0_denorm'] = f0_denorm = denorm_f0(f0, uv, hparams, pitch_padding=pitch_padding)
+        ret['f0_denorm_mse'] = f0_denorm
+        
         if pitch_padding is not None:
             f0[pitch_padding] = 0
 

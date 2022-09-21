@@ -18,6 +18,8 @@ from modules.fastspeech.tts_modules import mel2ph_to_dur
 from usr.diff.candidate_decoder import FFT
 from utils.pitch_utils import denorm_f0
 from utils.plot import spec_to_figure, dur_to_figure, f0_to_figure
+from multiprocessing.pool import Pool
+from tqdm import tqdm
 
 from tasks.tts.fs2_utils import FastSpeechDataset
 from tasks.tts.fs2 import FastSpeech2Task
@@ -397,6 +399,127 @@ class DiffSingerMIDITask(DiffSingerTask):
             sdur_loss = F.mse_loss((sent_dur_p + 1).log(), (sent_dur_g + 1).log(), reduction='mean')
             losses['sdur'] = sdur_loss.mean() * hparams['lambda_sent_dur']
 
+    ############
+    # infer
+    ############
+    def test_step(self, sample, batch_idx):
+        spk_embed = sample.get('spk_embed') if not hparams['use_spk_id'] else sample.get('spk_ids')
+        txt_tokens = sample['txt_tokens']
+        mel2ph, uv, f0 = None, None, None
+        ref_mels = None
+        if hparams['profile_infer']:
+            pass
+        else:
+            if hparams['use_gt_dur']:
+                mel2ph = sample['mel2ph']
+            if hparams['use_gt_f0']:
+                f0 = sample['f0']
+                uv = sample['uv']
+                print('Here using gt f0!!')
+            if hparams.get('use_midi') is not None and hparams['use_midi']:
+                outputs = self.model(
+                    txt_tokens, spk_embed=spk_embed, mel2ph=mel2ph, f0=f0, uv=uv, ref_mels=ref_mels, infer=True,
+                    pitch_midi=sample['pitch_midi'], midi_dur=sample.get('midi_dur'), is_slur=sample.get('is_slur'),
+                    enable_pitch_flow=True)
+            else:
+                outputs = self.model(
+                    txt_tokens, spk_embed=spk_embed, mel2ph=mel2ph, f0=f0, uv=uv, ref_mels=ref_mels, infer=True)
+            sample['outputs'] = self.model.out2mel(outputs['mel_out'])
+            sample['mel2ph_pred'] = outputs['mel2ph']
+            if hparams.get('pe_enable') is not None and hparams['pe_enable']:
+                sample['f0'] = self.pe(sample['mels'])['f0_denorm_pred']  # pe predict from GT mel
+                sample['f0_pred'] = self.pe(sample['outputs'])['f0_denorm_pred']  # pe predict from Pred mel
+            else:
+                sample['f0'] = denorm_f0(sample['f0'], sample['uv'], hparams)
+                sample['f0_pred_mse'] = outputs.get('f0_denorm_mse')
+                sample['f0_pred_gen'] = outputs.get('f0_denorm')
+                sample['f0_pred'] = outputs.get('f0_denorm')
+            return self.after_infer(sample)
+
+    def after_infer(self, predictions):
+        if self.saving_result_pool is None and not hparams['profile_infer']:
+            self.saving_result_pool = Pool(min(int(os.getenv('N_PROC', os.cpu_count())), 16))
+            self.saving_results_futures = []
+        predictions = utils.unpack_dict_to_list(predictions)
+        t = tqdm(predictions)
+        for num_predictions, prediction in enumerate(t):
+            for k, v in prediction.items():
+                if type(v) is torch.Tensor:
+                    prediction[k] = v.cpu().numpy()
+
+            item_name = prediction.get('item_name')
+            text = prediction.get('text').replace(":", "%3A")[:80]
+
+            # remove paddings
+            mel_gt = prediction["mels"]
+            mel_gt_mask = np.abs(mel_gt).sum(-1) > 0
+            mel_gt = mel_gt[mel_gt_mask]
+            mel2ph_gt = prediction.get("mel2ph")
+            mel2ph_gt = mel2ph_gt[mel_gt_mask] if mel2ph_gt is not None else None
+            mel_pred = prediction["outputs"]
+            mel_pred_mask = np.abs(mel_pred).sum(-1) > 0
+            mel_pred = mel_pred[mel_pred_mask]
+            mel_gt = np.clip(mel_gt, hparams['mel_vmin'], hparams['mel_vmax'])
+            mel_pred = np.clip(mel_pred, hparams['mel_vmin'], hparams['mel_vmax'])
+
+            mel2ph_pred = prediction.get("mel2ph_pred")
+            if mel2ph_pred is not None:
+                if len(mel2ph_pred) > len(mel_pred_mask):
+                    mel2ph_pred = mel2ph_pred[:len(mel_pred_mask)]
+                mel2ph_pred = mel2ph_pred[mel_pred_mask]
+
+            f0_gt = prediction.get("f0")
+            f0_pred = prediction.get("f0_pred")
+            if f0_pred is not None:
+                f0_gt = f0_gt[mel_gt_mask]
+                if len(f0_pred) > len(mel_pred_mask):
+                    f0_pred = f0_pred[:len(mel_pred_mask)]
+                f0_pred = f0_pred[mel_pred_mask]
+
+            str_phs = None
+            if self.phone_encoder is not None and 'txt_tokens' in prediction:
+                str_phs = self.phone_encoder.decode(prediction['txt_tokens'], strip_padding=True)
+            gen_dir = os.path.join(hparams['work_dir'],
+                                   f'generated_{self.trainer.global_step}_{hparams["gen_dir_name"]}')
+            wav_pred = self.vocoder.spec2wav(mel_pred, f0=f0_pred)
+            if not hparams['profile_infer']:
+                os.makedirs(gen_dir, exist_ok=True)
+                os.makedirs(f'{gen_dir}/wavs', exist_ok=True)
+                os.makedirs(f'{gen_dir}/plot', exist_ok=True)
+                os.makedirs(os.path.join(hparams['work_dir'], 'P_mels_npy'), exist_ok=True)
+                os.makedirs(os.path.join(hparams['work_dir'], 'G_mels_npy'), exist_ok=True)
+                self.saving_results_futures.append(
+                    self.saving_result_pool.apply_async(self.save_result, args=[
+                        wav_pred, mel_pred, 'P', item_name, text, gen_dir, str_phs, mel2ph_pred, f0_gt, f0_pred]))
+
+                if mel_gt is not None and hparams['save_gt']:
+                    wav_gt = self.vocoder.spec2wav(mel_gt, f0=f0_gt)
+                    self.saving_results_futures.append(
+                        self.saving_result_pool.apply_async(self.save_result, args=[
+                            wav_gt, mel_gt, 'G', item_name, text, gen_dir, str_phs, mel2ph_gt, f0_gt, f0_pred]))
+                import matplotlib.pyplot as plt
+                f0_pred_mse = predictions[0].get('f0_pred_mse')
+                f0_pred_gen = predictions[0]['f0_pred_gen']
+                f0_gt = predictions[0]['f0']
+                fig = plt.figure()
+                plt.plot(f0_gt, label='f0_gt')
+                if f0_pred_mse is not None:
+                    plt.plot(f0_pred_mse, label='f0_pred_mse')
+                plt.plot(f0_pred_gen, label='f0_pred_gen')
+                plt.legend()
+                plt.tight_layout()
+                plt.savefig(f'{gen_dir}/plot/[F0][{item_name}]{text}.png', format='png')
+                plt.close(fig)
+
+                t.set_description(
+                    f"Pred_shape: {mel_pred.shape}, gt_shape: {mel_gt.shape}")
+            else:
+                if 'gen_wav_time' not in self.stats:
+                    self.stats['gen_wav_time'] = 0
+                self.stats['gen_wav_time'] += len(wav_pred) / hparams['audio_sample_rate']
+                print('gen_wav_time: ', self.stats['gen_wav_time'])
+
+        return {}
 
 class AuxDecoderMIDITask(FastSpeech2Task):
     def __init__(self):

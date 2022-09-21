@@ -83,6 +83,7 @@ class DiffNet(nn.Module):
         super().__init__()
         self.params = params = AttrDict(
             # Model params
+            # encoder_hidden=hparams['hidden_size'] + 64,
             encoder_hidden=hparams['hidden_size'],
             residual_layers=hparams['residual_layers'],
             residual_channels=hparams['residual_channels'] ,
