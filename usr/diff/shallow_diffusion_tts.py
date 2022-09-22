@@ -134,18 +134,26 @@ class GaussianDiffusion(nn.Module):
         self.register_buffer('spec_max', torch.FloatTensor(spec_max)[None, None, :hparams['keep_bins']])
 
     def q_mean_variance(self, x_start, t):
+        # diffusion forward step
+        # q(xt|x0) = N(sqrt(accu_at)*x0, 1-accu_at)
         mean = extract(self.sqrt_alphas_cumprod, t, x_start.shape) * x_start
         variance = extract(1. - self.alphas_cumprod, t, x_start.shape)
         log_variance = extract(self.log_one_minus_alphas_cumprod, t, x_start.shape)
         return mean, variance, log_variance
 
     def predict_start_from_noise(self, x_t, t, noise):
+        # Nice property of diffusion
+        # x0 = xt/sqrt(accu_at) - sqrt(1/accu_at-1)*epsilon
+        # epsilon ～ N(0,1)
         return (
                 extract(self.sqrt_recip_alphas_cumprod, t, x_t.shape) * x_t -
                 extract(self.sqrt_recipm1_alphas_cumprod, t, x_t.shape) * noise
         )
 
     def q_posterior(self, x_start, x_t, t):
+        # q(x_t-1|x_t,x_0)=N(mu(xt,x0), beta_hat)
+        # mu(xt,x0) = posterior_mean_coef1 * x0 + posterior_mean_coef2 * xt
+        # beta_hat = posterior_variance
         posterior_mean = (
                 extract(self.posterior_mean_coef1, t, x_t.shape) * x_start +
                 extract(self.posterior_mean_coef2, t, x_t.shape) * x_t
@@ -155,17 +163,20 @@ class GaussianDiffusion(nn.Module):
         return posterior_mean, posterior_variance, posterior_log_variance_clipped
 
     def p_mean_variance(self, x, t, cond, clip_denoised: bool):
+        # used by p_sample.
+        # step1: predict noise, use it to obtain the predicted x_start
         noise_pred = self.denoise_fn(x, t, cond=cond)
         x_recon = self.predict_start_from_noise(x, t=t, noise=noise_pred)
 
         if clip_denoised:
             x_recon.clamp_(-1., 1.)
-
+        # step2: use x_t and x_start to obtain x_t-1
         model_mean, posterior_variance, posterior_log_variance = self.q_posterior(x_start=x_recon, x_t=x, t=t)
         return model_mean, posterior_variance, posterior_log_variance
 
     @torch.no_grad()
     def p_sample(self, x, t, cond, clip_denoised=True, repeat_noise=False):
+        # perform a x_t ==> x_t-1 step
         b, *_, device = *x.shape, x.device
         model_mean, _, model_log_variance = self.p_mean_variance(x=x, t=t, cond=cond, clip_denoised=clip_denoised)
         noise = noise_like(x.shape, device, repeat_noise)
@@ -209,6 +220,8 @@ class GaussianDiffusion(nn.Module):
         return x_prev
 
     def q_sample(self, x_start, t, noise=None):
+        # diffusion forward step
+        # x_t = sqrt(accu_at)*x_start + sqrt(1-accu_at)*noise 
         noise = default(noise, lambda: torch.randn_like(x_start))
         return (
                 extract(self.sqrt_alphas_cumprod, t, x_start.shape) * x_start +
@@ -216,6 +229,7 @@ class GaussianDiffusion(nn.Module):
         )
 
     def p_losses(self, x_start, t, cond, noise=None, nonpadding=None):
+        # learn the noise predictor by reconstructing the noise that generates the x_noisy
         noise = default(noise, lambda: torch.randn_like(x_start))
 
         x_noisy = self.q_sample(x_start=x_start, t=t, noise=noise)
