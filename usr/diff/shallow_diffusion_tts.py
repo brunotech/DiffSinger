@@ -174,6 +174,7 @@ class GaussianDiffusion(nn.Module):
         model_mean, posterior_variance, posterior_log_variance = self.q_posterior(x_start=x_recon, x_t=x, t=t)
         return model_mean, posterior_variance, posterior_log_variance
 
+    
     @torch.no_grad()
     def p_sample(self, x, t, cond, clip_denoised=True, repeat_noise=False):
         # perform a x_t ==> x_t-1 step
@@ -277,6 +278,8 @@ class GaussianDiffusion(nn.Module):
                 shape = (cond.shape[0], 1, self.mel_bins, cond.shape[2])
                 x = torch.randn(shape, device=device)
 
+            if self.mel_bins == 1:
+                hparams['infer_with_ref'] = True
             if hparams.get('pndm_speedup'):
                 self.noise_list = deque(maxlen=4)
                 iteration_interval = hparams['pndm_speedup']

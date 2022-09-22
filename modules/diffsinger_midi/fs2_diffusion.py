@@ -1,3 +1,5 @@
+import librosa
+import torch
 from modules.commons.common_layers import *
 from modules.commons.common_layers import Embedding
 from modules.fastspeech.tts_modules import FastspeechDecoder, DurationPredictor, LengthRegulator, PitchPredictor, \
@@ -8,12 +10,10 @@ from utils.hparams import hparams
 from utils.pitch_utils import f0_to_coarse, denorm_f0, norm_f0
 from modules.fastspeech.fs2 import FastSpeech2
 
-
 from modules.fap.attribute_prediction_model import AGAP, f0_model_config, BGAP
 from modules.fap.common import LinearNorm
 from modules.fap.loss import AttributePredictionLoss
 from modules.diffsinger_midi.diffusion import GaussianDiffusion
- 
 
 class FastspeechMIDIEncoder(FastspeechEncoder):
     def forward_embedding(self, txt_tokens, midi_embedding, midi_dur_embedding, slur_embedding):
@@ -123,7 +123,12 @@ class FastSpeech2DiffusionMIDI(FastSpeech2):
 
         mel2ph_ = mel2ph[..., None].repeat([1, 1, encoder_out.shape[-1]])
         decoder_inp_origin = decoder_inp = torch.gather(decoder_inp, 1, mel2ph_)  # [B, T, H]
-
+        f0_midi = librosa.midi_to_hz(kwargs['pitch_midi'].cpu().numpy())
+        f0_midi = torch.from_numpy(f0_midi).float().to(decoder_inp.device)
+        f0_midi = F.pad(f0_midi, [1, 0])
+        f0_midi = torch.gather(f0_midi, 1, mel2ph_[..., 0])  # [B, T, H]
+        ret['f0_midi'] = f0_midi
+        
         tgt_nonpadding = (mel2ph > 0).float()[:, :, None]
 
         # add pitch and energy embed
@@ -168,7 +173,8 @@ class FastSpeech2DiffusionMIDI(FastSpeech2):
                 decoder_inp = decoder_inp.transpose(1,2)
                 decoder_inp = torch.cat([decoder_inp, pred_f0_encoding], dim=1)
                 spk_emb = torch.zeros([decoder_inp.shape[0], 0]).to(decoder_inp.device)
-                pitch_flow_ret = self.pitch_flow(decoder_inp, ret={}, infer=True)
+                ret['f0_midi'] = norm_f0(ret['f0_midi'], uv, hparams, pitch_padding)
+                pitch_flow_ret = self.pitch_flow(decoder_inp, ret=ret, infer=True)
                 pred_sample = pitch_flow_ret['f0_out'].squeeze(-1)
                 
                 if hparams.get("fit_midi_f0") is not None and hparams['fit_midi_f0'] is True:

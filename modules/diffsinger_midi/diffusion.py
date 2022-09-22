@@ -14,7 +14,7 @@ from modules.fastspeech.fs2 import FastSpeech2
 from modules.diffsinger_midi.fs2 import FastSpeech2MIDI
 from utils.hparams import hparams
 from usr.diff.net import DiffNet
-
+from collections import deque
 
 def exists(x):
     return x is not None
@@ -255,14 +255,83 @@ class GaussianDiffusion(nn.Module):
         model_mean, posterior_variance, posterior_log_variance = self.q_posterior(x_start=x_recon, x_t=x, t=t)
         return model_mean, posterior_variance, posterior_log_variance
 
+
+    def p_mean_variance_with_ref(self, x, t, cond, x_ref, clip_denoised: bool):
+        # used by p_sample.
+        # step1: predict noise, use it to obtain the predicted x_start
+        def refine_x_recon_with_ref(x_recon, t, x_ref):
+            x_ref = x_ref.reshape([1,1,1,-1])
+            diff_mat = x_ref - x_recon
+            voiced_mask = (x_ref != 0).float()
+            diff_mat = diff_mat * voiced_mask
+            step_size = 0.1 # todo: change step_size based on t
+            x_recon = x_recon + diff_mat * step_size
+            return x_recon
+
+        noise_pred = self.denoise_fn(x, t, cond=cond)
+        x_recon = self.predict_start_from_noise(x, t=t, noise=noise_pred)
+        x_recon = refine_x_recon_with_ref(x_recon, t, x_ref)
+
+        if clip_denoised:
+            x_recon.clamp_(-1., 1.)
+        # step2: use x_t and x_start to obtain x_t-1
+        model_mean, posterior_variance, posterior_log_variance = self.q_posterior(x_start=x_recon, x_t=x, t=t)
+        return model_mean, posterior_variance, posterior_log_variance
+
+    @torch.no_grad()
+    def p_sample_with_ref(self, x, t, cond, x_ref, clip_denoised=True, repeat_noise=False):
+        # perform a x_t ==> x_t-1 step
+        b, *_, device = *x.shape, x.device
+        model_mean, _, model_log_variance = self.p_mean_variance_with_ref(x=x, t=t, cond=cond, x_ref=x_ref, clip_denoised=clip_denoised)
+        noise = noise_like(x.shape, device, repeat_noise)
+        # no noise when t == 0
+        nonzero_mask = (1 - (t == 0).float()).reshape(b, *((1,) * (len(x.shape) - 1)))
+        return model_mean + nonzero_mask * (0.5 * model_log_variance).exp() * noise
+    
     @torch.no_grad()
     def p_sample(self, x, t, cond, clip_denoised=True, repeat_noise=False):
+        # perform a x_t ==> x_t-1 step
         b, *_, device = *x.shape, x.device
         model_mean, _, model_log_variance = self.p_mean_variance(x=x, t=t, cond=cond, clip_denoised=clip_denoised)
         noise = noise_like(x.shape, device, repeat_noise)
         # no noise when t == 0
         nonzero_mask = (1 - (t == 0).float()).reshape(b, *((1,) * (len(x.shape) - 1)))
         return model_mean + nonzero_mask * (0.5 * model_log_variance).exp() * noise
+    
+    @torch.no_grad()
+    def p_sample_plms(self, x, t, interval, cond, clip_denoised=True, repeat_noise=False):
+        """
+        Use the PLMS method from [Pseudo Numerical Methods for Diffusion Models on Manifolds](https://arxiv.org/abs/2202.09778).
+        """
+
+        def get_x_pred(x, noise_t, t):
+            a_t = extract(self.alphas_cumprod, t, x.shape)
+            a_prev = extract(self.alphas_cumprod, torch.max(t-interval, torch.zeros_like(t)), x.shape)
+            a_t_sq, a_prev_sq = a_t.sqrt(), a_prev.sqrt()
+
+            x_delta = (a_prev - a_t) * ((1 / (a_t_sq * (a_t_sq + a_prev_sq))) * x - 1 / (a_t_sq * (((1 - a_prev) * a_t).sqrt() + ((1 - a_t) * a_prev).sqrt())) * noise_t)
+            x_pred = x + x_delta
+
+            return x_pred
+
+        noise_list = self.noise_list
+        noise_pred = self.denoise_fn(x, t, cond=cond)
+
+        if len(noise_list) == 0:
+            x_pred = get_x_pred(x, noise_pred, t)
+            noise_pred_prev = self.denoise_fn(x_pred, max(t-interval, 0), cond=cond)
+            noise_pred_prime = (noise_pred + noise_pred_prev) / 2
+        elif len(noise_list) == 1:
+            noise_pred_prime = (3 * noise_pred - noise_list[-1]) / 2
+        elif len(noise_list) == 2:
+            noise_pred_prime = (23 * noise_pred - 16 * noise_list[-1] + 5 * noise_list[-2]) / 12
+        elif len(noise_list) >= 3:
+            noise_pred_prime = (55 * noise_pred - 59 * noise_list[-1] + 37 * noise_list[-2] - 9 * noise_list[-3]) / 24
+
+        x_prev = get_x_pred(x, noise_pred_prime, t)
+        noise_list.append(noise_pred)
+
+        return x_prev
 
     def q_sample(self, x_start, t, noise=None):
         noise = default(noise, lambda: torch.randn_like(x_start))
@@ -303,8 +372,24 @@ class GaussianDiffusion(nn.Module):
             t = self.num_timesteps
             shape = (cond.shape[0], 1, self.mel_bins, cond.shape[2])
             x = torch.randn(shape, device=device)
-            for i in tqdm(reversed(range(0, t)), desc='sample time step', total=t):
-                x = self.p_sample(x, torch.full((b,), i, device=device, dtype=torch.long), cond, clip_denoised=False)
+
+            if self.mel_bins == 1:
+                hparams['infer_with_ref'] = True
+            if hparams.get('pndm_speedup'):
+                self.noise_list = deque(maxlen=4)
+                iteration_interval = hparams['pndm_speedup']
+                for i in tqdm(reversed(range(0, t, iteration_interval)), desc='sample time step',
+                              total=t // iteration_interval):
+                    x = self.p_sample_plms(x, torch.full((b,), i, device=device, dtype=torch.long), iteration_interval,
+                                           cond)
+            elif hparams.get('infer_with_ref') is True:
+                for i in tqdm(reversed(range(0, t)), desc='sample time step', total=t):
+                    x = self.p_sample_with_ref(x, torch.full((b,), i, device=device, dtype=torch.long), cond, x_ref=ret['f0_midi'])
+            
+            else:
+                for i in tqdm(reversed(range(0, t)), desc='sample time step', total=t):
+                    x = self.p_sample(x, torch.full((b,), i, device=device, dtype=torch.long), cond)
+           
             x = x[:, 0].transpose(1, 2)
             ret['f0_out'] = x
         return ret
