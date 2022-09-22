@@ -278,8 +278,6 @@ class GaussianDiffusion(nn.Module):
                 shape = (cond.shape[0], 1, self.mel_bins, cond.shape[2])
                 x = torch.randn(shape, device=device)
 
-            if self.mel_bins == 1:
-                hparams['infer_with_ref'] = True
             if hparams.get('pndm_speedup'):
                 self.noise_list = deque(maxlen=4)
                 iteration_interval = hparams['pndm_speedup']

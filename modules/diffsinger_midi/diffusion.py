@@ -265,6 +265,8 @@ class GaussianDiffusion(nn.Module):
             voiced_mask = (x_ref != 0).float()
             diff_mat = diff_mat * voiced_mask
             step_size = 0.1 # todo: change step_size based on t
+            if t <= 50:
+                step_size = 0
             x_recon = x_recon + diff_mat * step_size
             return x_recon
 
@@ -384,11 +386,11 @@ class GaussianDiffusion(nn.Module):
                                            cond)
             elif hparams.get('infer_with_ref') is True:
                 for i in tqdm(reversed(range(0, t)), desc='sample time step', total=t):
-                    x = self.p_sample_with_ref(x, torch.full((b,), i, device=device, dtype=torch.long), cond, x_ref=ret['f0_midi'])
+                    x = self.p_sample_with_ref(x, torch.full((b,), i, device=device, dtype=torch.long), cond, x_ref=ret['f0_midi'], clip_denoised=False)
             
             else:
                 for i in tqdm(reversed(range(0, t)), desc='sample time step', total=t):
-                    x = self.p_sample(x, torch.full((b,), i, device=device, dtype=torch.long), cond)
+                    x = self.p_sample(x, torch.full((b,), i, device=device, dtype=torch.long), cond, clip_denoised=False)
            
             x = x[:, 0].transpose(1, 2)
             ret['f0_out'] = x
