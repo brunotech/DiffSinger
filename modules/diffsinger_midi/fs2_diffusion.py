@@ -173,8 +173,8 @@ class FastSpeech2DiffusionMIDI(FastSpeech2):
                 decoder_inp = decoder_inp.transpose(1,2)
                 decoder_inp = torch.cat([decoder_inp, pred_f0_encoding], dim=1)
                 spk_emb = torch.zeros([decoder_inp.shape[0], 0]).to(decoder_inp.device)
-                ret['f0_midi'] = norm_f0(ret['f0_midi'], uv, hparams, pitch_padding)
-                pitch_flow_ret = self.pitch_flow(decoder_inp, ret={'f0_midi':ret['f0_midi']}, infer=True)
+                ret['f0_midi'] = norm_f0(ret['f0_midi'], uv, hparams, pitch_padding) 
+                pitch_flow_ret = self.pitch_flow(decoder_inp, ret={'f0_midi':ret['f0_midi'] / diff_scale}, infer=True)
                 pred_sample = pitch_flow_ret['f0_out'].squeeze(-1)
                 
                 if hparams.get("fit_midi_f0") is not None and hparams['fit_midi_f0'] is True:

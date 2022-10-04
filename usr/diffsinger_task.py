@@ -434,6 +434,7 @@ class DiffSingerMIDITask(DiffSingerTask):
                 sample['f0_pred_mse'] = outputs.get('f0_denorm_mse')
                 sample['f0_pred_gen'] = outputs.get('f0_denorm')
                 sample['f0_pred'] = outputs.get('f0_denorm')
+                sample['f0_midi'] = denorm_f0(outputs.get('f0_midi'), None, hparams)
             return self.after_infer(sample)
 
     def after_infer(self, predictions):
@@ -502,11 +503,11 @@ class DiffSingerMIDITask(DiffSingerTask):
                 f0_pred_gen = predictions[0]['f0_pred_gen']
                 f0_gt = predictions[0]['f0']
                 fig = plt.figure()
-                plt.plot(f0_gt, label='f0_gt')
+                # plt.plot(f0_gt, label='f0_gt')
                 if f0_pred_mse is not None:
                     plt.plot(f0_pred_mse, label='f0_pred_mse')
                 plt.plot(f0_pred_gen, label='f0_pred_gen')
-                plt.plot(predictions[0]['mel2f0_midi'], label='f0_midi')
+                plt.plot(predictions[0]['f0_midi'], label='f0_midi')
                 plt.legend()
                 plt.tight_layout()
                 plt.savefig(f'{gen_dir}/plot/[F0][{item_name}]{text}.png', format='png')

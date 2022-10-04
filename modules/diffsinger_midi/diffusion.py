@@ -264,8 +264,9 @@ class GaussianDiffusion(nn.Module):
             diff_mat = x_ref - x_recon
             voiced_mask = (x_ref != 0).float()
             diff_mat = diff_mat * voiced_mask
-            step_size = 0.1 # todo: change step_size based on t
-            if t <= 50:
+            step_size = 1.0 # todo: change step_size based on t
+            # step_size = 0
+            if t <= 2:
                 step_size = 0
             x_recon = x_recon + diff_mat * step_size
             return x_recon
