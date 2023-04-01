@@ -29,11 +29,10 @@ class Prenet(nn.Module):
         padding_mask = x.abs().sum(-1).eq(0).data  # [B, T]
         nonpadding_mask_TB = 1 - padding_mask.float()[:, None, :]  # [B, 1, T]
         x = x.transpose(1, 2)
-        hiddens = []
         for i, l in enumerate(self.layers):
             nonpadding_mask_TB = nonpadding_mask_TB[:, :, ::self.strides[i]]
             x = l(x) * nonpadding_mask_TB
-        hiddens.append(x)
+        hiddens = [x]
         hiddens = torch.stack(hiddens, 0)  # [L, B, H, T]
         hiddens = hiddens.transpose(2, 3)  # [L, B, T, H]
         x = self.out_proj(x.transpose(1, 2))  # [B, T, H]

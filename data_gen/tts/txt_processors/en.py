@@ -25,10 +25,7 @@ class EnG2p(G2p):
 
             elif word in self.homograph2features:  # Check homograph
                 pron1, pron2, pos1 = self.homograph2features[word]
-                if pos.startswith(pos1):
-                    pron = pron1
-                else:
-                    pron = pron2
+                pron = pron1 if pos.startswith(pos1) else pron2
             elif word in self.cmu:  # lookup CMU dict
                 pron = self.cmu[word][0]
             else:  # predict for oov

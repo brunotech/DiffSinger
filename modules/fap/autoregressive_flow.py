@@ -140,7 +140,7 @@ class AR_Step(torch.nn.Module):
             s = torch.sigmoid(scale_unconstrained + 10) + 1e-6
             log_s = torch.log(s)
         else:
-            raise Exception("Scaling fn {} not supp.".format(self.scaling_fn))
+            raise Exception(f"Scaling fn {self.scaling_fn} not supp.")
 
         return s, log_s
 
@@ -200,7 +200,7 @@ class AR_Step(torch.nn.Module):
             1, residual.size(1), residual.size(2)).zero_()
         self.attr_lstm.flatten_parameters()
 
-        for i in range(0, residual.size(0)):
+        for i in range(residual.size(0)):
             if i == 0:
                 output = dummy
                 mel_hidden, (h, c) = self.attr_lstm(output)
@@ -230,6 +230,5 @@ class AR_Step(torch.nn.Module):
                 output = (residual[i:i+1] - b)/s
             total_output.append(output)
 
-        total_output = torch.cat(total_output, 0)
-        return total_output
+        return torch.cat(total_output, 0)
 

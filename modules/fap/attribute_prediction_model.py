@@ -87,7 +87,7 @@ def get_attribute_prediction_model(config):
     elif name == 'agap':
         model = AGAP(**hparams)
     else:
-        raise Exception("{} model is not supported".format(name))
+        raise Exception(f"{name} model is not supported")
 
     return model
 
@@ -158,8 +158,7 @@ class DAP(nn.Module):
 
         x_hat = self.feat_pred_fn(context, lens)
 
-        outputs = {'x_hat': x_hat, 'x': x}
-        return outputs
+        return {'x_hat': x_hat, 'x': x}
 
     def infer(self, z, txt_enc, spk_emb, lens=None):
         x_hat = self.forward(txt_enc, spk_emb, x=None, lens=lens)['x_hat']
@@ -231,8 +230,7 @@ class BGAP(torch.nn.Module):
         if self.n_group_size > 1:
             txt_emb = self.unfold(txt_emb[..., None])
         speaker_vecs = speaker_vecs[..., None].expand(-1, -1, txt_emb.shape[2])
-        context = torch.cat((txt_emb, speaker_vecs), 1)
-        return context
+        return torch.cat((txt_emb, speaker_vecs), 1)
 
     def forward(self, txt_enc, spk_emb, x, lens):
         """x<tensor>: duration or pitch or energy average"""
@@ -252,12 +250,7 @@ class BGAP(torch.nn.Module):
             x, log_det_W = self.convinv[k](x)
             log_det_W_list.append(log_det_W)
             log_s_list.append(log_s)
-        # prepare outputs
-        outputs = {'z': x,
-                   'log_det_W_list': log_det_W_list,
-                   'log_s_list': log_s_list}
-
-        return outputs
+        return {'z': x, 'log_det_W_list': log_det_W_list, 'log_s_list': log_s_list}
 
     def infer(self, z, txt_enc, spk_emb, seq_lens):
         txt_enc = self.bottleneck_layer(txt_enc)
@@ -268,10 +261,7 @@ class BGAP(torch.nn.Module):
             z = self.convinv[k](z, inverse=True)
             z = self.transforms[k].forward(z, context,
                                            inverse=True, seq_lens=lens_grouped)
-        # z mapped to input domain
-        x_hat = self.fold(z)
-        # pad on the way out
-        return x_hat
+        return self.fold(z)
 
 
 class AGAP(torch.nn.Module):
@@ -325,8 +315,7 @@ class AGAP(torch.nn.Module):
         if self.n_group_size > 1:
             txt_emb = self.unfold(txt_emb[..., None])
         speaker_vecs = speaker_vecs[..., None].expand(-1, -1, txt_emb.shape[2])
-        context = torch.cat((txt_emb, speaker_vecs), 1)
-        return context
+        return torch.cat((txt_emb, speaker_vecs), 1)
 
     def forward(self, txt_emb, spk_emb, x, lens):
         """x<tensor>: duration or pitch or energy average"""
@@ -343,14 +332,13 @@ class AGAP(torch.nn.Module):
 
         lens_groupped = (lens // self.n_group_size).long()
         log_s_list = []
-        for i, flow in enumerate(self.flows):
+        for flow in self.flows:
             x, log_s = flow(x, context, lens_groupped)
             log_s_list.append(log_s)
 
         x = x.permute(1, 2, 0)  # x mapped to z
         log_s_list = [log_s_elt.permute(1, 2, 0) for log_s_elt in log_s_list]
-        outputs = {'z': x, 'log_s_list': log_s_list, 'log_det_W_list': []}
-        return outputs
+        return {'z': x, 'log_s_list': log_s_list, 'log_det_W_list': []}
 
     def infer(self, z, txt_emb, spk_emb, seq_lens=None):
         if self.n_group_size > 1:
@@ -362,7 +350,7 @@ class AGAP(torch.nn.Module):
         context = self.preprocess_context(txt_emb, spk_emb)
         context = context.permute(2, 0, 1)  # permute to time, batch, dims
 
-        for i, flow in enumerate(reversed(self.flows)):
+        for flow in reversed(self.flows):
             z = flow.infer(z, context)
 
         x_hat = z.permute(1, 2, 0)

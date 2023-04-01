@@ -41,7 +41,7 @@ class TxtProcessor(zh.TxtProcessor):
                 if pre_align_args['use_tone']:
                     p = pinyin(p, style=Style.TONE3, strict=True)[0][0]
                     if p[-1] not in ['1', '2', '3', '4', '5']:
-                        p = p + '5'
+                        p = f'{p}5'
                 else:
                     p = pinyin(p, style=Style.NORMAL, strict=True)[0][0]
 
@@ -59,10 +59,15 @@ class TxtProcessor(zh.TxtProcessor):
 
         # 去除静音符号周围的词边界标记 [..., '#', ',', '#', ...]
         sil_phonemes = list(PUNCS) + TxtProcessor.sp_phonemes()
-        ph_list_ = []
-        for i in range(0, len(ph_list), 1):
-            if ph_list[i] != '#' or (ph_list[i - 1] not in sil_phonemes and ph_list[i + 1] not in sil_phonemes):
-                ph_list_.append(ph_list[i])
+        ph_list_ = [
+            ph_list[i]
+            for i in range(len(ph_list))
+            if ph_list[i] != '#'
+            or (
+                ph_list[i - 1] not in sil_phonemes
+                and ph_list[i + 1] not in sil_phonemes
+            )
+        ]
         ph_list = ph_list_
         return ph_list, txt
 

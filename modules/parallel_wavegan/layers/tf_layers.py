@@ -123,7 +123,7 @@ class TFResidualStack(tf.keras.layers.Layer):
 
         """
         _x = tf.identity(x)
-        for i, layer in enumerate(self.block):
+        for layer in self.block:
             _x = layer(_x)
         shortcut = self.shortcut(x)
         return shortcut + _x

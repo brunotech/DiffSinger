@@ -83,8 +83,7 @@ class FastSpeech2Flow(nn.Module):
 
     def build_embedding(self, dictionary, embed_dim):
         num_embeddings = len(dictionary)
-        emb = Embedding(num_embeddings, embed_dim, self.padding_idx)
-        return emb
+        return Embedding(num_embeddings, embed_dim, self.padding_idx)
 
     def forward(self, txt_tokens, mel2ph=None, spk_embed=None,
                 ref_mels=None, f0=None, uv=None, energy=None, skip_decoder=False,
@@ -191,37 +190,40 @@ class FastSpeech2Flow(nn.Module):
         if pitch_padding is not None:
             f0[pitch_padding] = 0
 
-        if kwargs.get('use_f0_flow') is not None and kwargs['use_f0_flow'] is True:
-            if enable_pitch_flow:
-                if infer: # inference stage
-                    z = torch.randn([decoder_inp.shape[0], 1, decoder_inp.shape[1]])
-                    pred_f0_encoding = self.pred_f0_uv_encoder(f0_denorm.transpose(1,2))
-                    decoder_inp = decoder_inp.transpose(1,2)
-                    decoder_inp = torch.cat([decoder_inp, pred_f0_encoding], dim=1)
-                    pred_diff_f0 = self.pitch_flow.infer(z, decoder_inp, spk_emb)
+        if (
+            kwargs.get('use_f0_flow') is not None
+            and kwargs['use_f0_flow'] is True
+            and enable_pitch_flow
+        ):
+            if infer: # inference stage
+                z = torch.randn([decoder_inp.shape[0], 1, decoder_inp.shape[1]])
+                pred_f0_encoding = self.pred_f0_uv_encoder(f0_denorm.transpose(1,2))
+                decoder_inp = decoder_inp.transpose(1,2)
+                decoder_inp = torch.cat([decoder_inp, pred_f0_encoding], dim=1)
+                pred_diff_f0 = self.pitch_flow.infer(z, decoder_inp, spk_emb)
 
-                    f0_denorm = f0_denorm + pred_diff_f0
-                    f0_denorm[uv>0] = 0
-                else:
-                    gt_f0 = f0
-                    gt_uv = uv
-                    gt_f0 = denorm_f0(gt_f0, gt_uv, hparams, pitch_padding=pitch_padding)
+                f0_denorm = f0_denorm + pred_diff_f0
+                f0_denorm[uv>0] = 0
+            else:
+                gt_f0 = f0
+                gt_uv = uv
+                gt_f0 = denorm_f0(gt_f0, gt_uv, hparams, pitch_padding=pitch_padding)
 
-                    pred_f0 = pitch_pred[:, :, 0]
-                    pred_uv = pitch_pred[:, :, 1] > 0
-                    pred_f0 = denorm_f0(pred_f0, gt_uv, hparams, pitch_padding=pitch_padding)
+                pred_f0 = pitch_pred[:, :, 0]
+                pred_uv = pitch_pred[:, :, 1] > 0
+                pred_f0 = denorm_f0(pred_f0, gt_uv, hparams, pitch_padding=pitch_padding)
 
-                    pred_f0_encoding = self.pred_f0_uv_encoder(pred_f0.transpose(1,2))
-                    decoder_inp = decoder_inp.transpose(1,2)
-                    decoder_inp = torch.cat([decoder_inp, pred_f0_encoding], dim=1)
+                pred_f0_encoding = self.pred_f0_uv_encoder(pred_f0.transpose(1,2))
+                decoder_inp = decoder_inp.transpose(1,2)
+                decoder_inp = torch.cat([decoder_inp, pred_f0_encoding], dim=1)
 
-                    diff_f0 = gt_f0 - pred_f0
-                    lens = pitch_padding.float().sum(dim=-1)
-                    spk_emb = torch.zeros([decoder_inp.shape[0], 0]).to(decoder_inp.device)
-                    ret = self.pitch_flow(decoder_inp, spk_emb, diff_f0, lens)
-                    loss_dict = self.pitch_loss_fn(ret, lens)
-                    loss_f0 = loss_dict['loss_f0'][0]
-                    ret['loss_pitch_flow'] = loss_f0
+                diff_f0 = gt_f0 - pred_f0
+                lens = pitch_padding.float().sum(dim=-1)
+                spk_emb = torch.zeros([decoder_inp.shape[0], 0]).to(decoder_inp.device)
+                ret = self.pitch_flow(decoder_inp, spk_emb, diff_f0, lens)
+                loss_dict = self.pitch_loss_fn(ret, lens)
+                loss_f0 = loss_dict['loss_f0'][0]
+                ret['loss_pitch_flow'] = loss_f0
 
         pitch = f0_to_coarse(f0_denorm)  # start from 0
         pitch_embed = self.pitch_embed(pitch)
@@ -237,8 +239,7 @@ class FastSpeech2Flow(nn.Module):
         f0 = cwt2f0(cwt_spec, mean, std, hparams['cwt_scales'])
         f0 = torch.cat(
             [f0] + [f0[:, -1:]] * (mel2ph.shape[1] - f0.shape[1]), 1)
-        f0_norm = norm_f0(f0, None, hparams)
-        return f0_norm
+        return norm_f0(f0, None, hparams)
 
     def out2mel(self, out):
         return out

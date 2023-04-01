@@ -51,7 +51,7 @@ class SineGen(torch.nn.Module):
 
         # initial phase noise (no noise for fundamental component)
         rand_ini = torch.rand(f0_values.shape[0], f0_values.shape[2], \
-                              device=f0_values.device)
+                                  device=f0_values.device)
         rand_ini[:, 0] = 0
         rad_values[:, 0, :] = rad_values[:, 0, :] + rand_ini
 
@@ -69,8 +69,9 @@ class SineGen(torch.nn.Module):
             cumsum_shift = torch.zeros_like(rad_values)
             cumsum_shift[:, 1:, :] = tmp_over_one_idx * -1.0
 
-            sines = torch.sin(torch.cumsum(rad_values + cumsum_shift, dim=1)
-                              * 2 * np.pi)
+            return torch.sin(
+                torch.cumsum(rad_values + cumsum_shift, dim=1) * 2 * np.pi
+            )
         else:
             # If necessary, make sure that the first time step of every
             # voiced segments is sin(pi) or cos(0)
@@ -98,8 +99,7 @@ class SineGen(torch.nn.Module):
             i_phase = torch.cumsum(rad_values - tmp_cumsum, dim=1)
 
             # get the sines
-            sines = torch.cos(i_phase * 2 * np.pi)
-        return sines
+            return torch.cos(i_phase * 2 * np.pi)
 
     def forward(self, f0):
         """ sine_tensor, uv = forward(f0)
@@ -355,7 +355,7 @@ class SineGen(torch.nn.Module):
 
         # initial phase noise (no noise for fundamental component)
         rand_ini = torch.rand(f0_values.shape[0], f0_values.shape[2], \
-                              device=f0_values.device)
+                                  device=f0_values.device)
         rand_ini[:, 0] = 0
         rad_values[:, 0, :] = rad_values[:, 0, :] + rand_ini
 
@@ -373,8 +373,9 @@ class SineGen(torch.nn.Module):
             cumsum_shift = torch.zeros_like(rad_values)
             cumsum_shift[:, 1:, :] = tmp_over_one_idx * -1.0
 
-            sines = torch.sin(torch.cumsum(rad_values + cumsum_shift, dim=1)
-                              * 2 * np.pi)
+            return torch.sin(
+                torch.cumsum(rad_values + cumsum_shift, dim=1) * 2 * np.pi
+            )
         else:
             # If necessary, make sure that the first time step of every
             # voiced segments is sin(pi) or cos(0)
@@ -402,8 +403,7 @@ class SineGen(torch.nn.Module):
             i_phase = torch.cumsum(rad_values - tmp_cumsum, dim=1)
 
             # get the sines
-            sines = torch.cos(i_phase * 2 * np.pi)
-        return sines
+            return torch.cos(i_phase * 2 * np.pi)
 
     def forward(self, f0):
         """ sine_tensor, uv = forward(f0)

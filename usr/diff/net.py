@@ -122,7 +122,7 @@ class DiffNet(nn.Module):
         diffusion_step = self.diffusion_embedding(diffusion_step)
         diffusion_step = self.mlp(diffusion_step)
         skip = []
-        for layer_id, layer in enumerate(self.residual_layers):
+        for layer in self.residual_layers:
             x, skip_connection = layer(x, cond, diffusion_step)
             skip.append(skip_connection)
 

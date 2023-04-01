@@ -114,9 +114,8 @@ class DurationPredictor(torch.nn.Module):
         xs = xs * (1 - x_masks.float())[:, :, None]  # (B, T, C)
         if is_inference:
             return self.out2dur(xs), xs
-        else:
-            if hparams['dur_loss'] in ['mse']:
-                xs = xs.squeeze(-1)  # (B, Tmax)
+        if hparams['dur_loss'] in ['mse']:
+            xs = xs.squeeze(-1)  # (B, Tmax)
         return xs
 
     def out2dur(self, xs):
@@ -185,8 +184,7 @@ class LengthRegulator(torch.nn.Module):
 
         pos_idx = torch.arange(dur.sum(-1).max())[None, None].to(dur.device)
         token_mask = (pos_idx >= dur_cumsum_prev[:, :, None]) & (pos_idx < dur_cumsum[:, :, None])
-        mel2ph = (token_idx * token_mask.long()).sum(1)
-        return mel2ph
+        return (token_idx * token_mask.long()).sum(1)
 
 
 class PitchPredictor(torch.nn.Module):

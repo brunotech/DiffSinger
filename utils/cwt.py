@@ -87,15 +87,15 @@ def normalize_cwt_lf0(f0, mean, std):
 
 
 def get_lf0_cwt_norm(f0s, mean, std):
-    uvs = list()
-    cont_lf0_lpfs = list()
-    cont_lf0_lpf_norms = list()
-    Wavelet_lf0s = list()
-    Wavelet_lf0s_norm = list()
-    scaless = list()
+    uvs = []
+    cont_lf0_lpfs = []
+    cont_lf0_lpf_norms = []
+    Wavelet_lf0s = []
+    Wavelet_lf0s_norm = []
+    scaless = []
 
-    means = list()
-    stds = list()
+    means = []
+    stds = []
     for f0 in f0s:
         uv, cont_lf0_lpf = get_cont_lf0(f0)
         cont_lf0_lpf_norm = (cont_lf0_lpf - mean) / std
@@ -138,9 +138,8 @@ def cwt2f0(cwt_spec, mean, std, cwt_scales):
     if isinstance(cwt_spec, torch.Tensor):
         f0 = inverse_cwt_torch(cwt_spec, cwt_scales)
         f0 = f0 * std[:, None] + mean[:, None]
-        f0 = f0.exp()  # [B, T]
+        return f0.exp()
     else:
         f0 = inverse_cwt(cwt_spec, cwt_scales)
         f0 = f0 * std[:, None] + mean[:, None]
-        f0 = np.exp(f0)  # [B, T]
-    return f0
+        return np.exp(f0)

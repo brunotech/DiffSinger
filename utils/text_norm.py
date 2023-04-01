@@ -88,7 +88,7 @@ class ChineseNumberUnit(ChineseChar):
         self.big_t = big_t
 
     def __str__(self):
-        return '10^{}'.format(self.power)
+        return f'10^{self.power}'
 
     @classmethod
     def create(cls, index, value, numbering_type=NUMBERING_TYPES[1], small_unit=False):
@@ -168,8 +168,7 @@ class MathSymbol(object):
         self.point = point
 
     def __iter__(self):
-        for v in self.__dict__.values():
-            yield v
+        yield from self.__dict__.values()
 
 
 # class OtherSymbol(object):
@@ -219,8 +218,9 @@ def create_system(numbering_type=NUMBERING_TYPES[1]):
     # symbols
     positive_cn = CM(POSITIVE[0], POSITIVE[1], '+', lambda x: x)
     negative_cn = CM(NEGATIVE[0], NEGATIVE[1], '-', lambda x: -x)
-    point_cn = CM(POINT[0], POINT[1], '.', lambda x,
-                                                  y: float(str(x) + '.' + str(y)))
+    point_cn = CM(
+        POINT[0], POINT[1], '.', lambda x, y: float(f'{str(x)}.{str(y)}')
+    )
     # sil_cn = CM(SIL[0], SIL[1], '-', lambda x, y: float(str(x) + '-' + str(y)))
     system = NumberSystem()
     system.units = smaller_units + larger_units
@@ -257,14 +257,20 @@ def chn2num(chinese_string, numbering_type=NUMBERING_TYPES[1]):
         一亿一千三百万 to 一亿 一千万 三百万
         """
 
-        if integer_symbols and isinstance(integer_symbols[0], CNU):
-            if integer_symbols[0].power == 1:
-                integer_symbols = [system.digits[1]] + integer_symbols
+        if (
+            integer_symbols
+            and isinstance(integer_symbols[0], CNU)
+            and integer_symbols[0].power == 1
+        ):
+            integer_symbols = [system.digits[1]] + integer_symbols
 
-        if len(integer_symbols) > 1:
-            if isinstance(integer_symbols[-1], CND) and isinstance(integer_symbols[-2], CNU):
-                integer_symbols.append(
-                    CNU(integer_symbols[-2].power - 1, None, None, None, None))
+        if (
+            len(integer_symbols) > 1
+            and isinstance(integer_symbols[-1], CND)
+            and isinstance(integer_symbols[-2], CNU)
+        ):
+            integer_symbols.append(
+                CNU(integer_symbols[-2].power - 1, None, None, None, None))
 
         result = []
         unit_count = 0
@@ -310,10 +316,7 @@ def chn2num(chinese_string, numbering_type=NUMBERING_TYPES[1]):
     int_part = correct_symbols(int_part, system)
     int_str = str(compute_value(int_part))
     dec_str = ''.join([str(d.value) for d in dec_part])
-    if dec_part:
-        return '{0}.{1}'.format(int_str, dec_str)
-    else:
-        return int_str
+    return '{0}.{1}'.format(int_str, dec_str) if dec_part else int_str
 
 
 def num2chn(number_string, numbering_type=NUMBERING_TYPES[1], big=False,
@@ -370,23 +373,23 @@ def num2chn(number_string, numbering_type=NUMBERING_TYPES[1], big=False,
                 next_symbol = result_symbols[i +
                                              1] if i < len(result_symbols) - 1 else None
                 previous_symbol = result_symbols[i - 1] if i > 0 else None
-                if isinstance(next_symbol, CNU) and isinstance(previous_symbol, (CNU, type(None))):
-                    if next_symbol.power != 1 and ((previous_symbol is None) or (previous_symbol.power != 1)):
-                        result_symbols[i] = liang
+                if (
+                    isinstance(next_symbol, CNU)
+                    and isinstance(previous_symbol, (CNU, type(None)))
+                    and next_symbol.power != 1
+                    and (
+                        (previous_symbol is None)
+                        or (previous_symbol.power != 1)
+                    )
+                ):
+                    result_symbols[i] = liang
 
     # if big is True, '两' will not be used and `alt_two` has no impact on output
     if big:
         attr_name = 'big_'
-        if traditional:
-            attr_name += 't'
-        else:
-            attr_name += 's'
+        attr_name += 't' if traditional else 's'
     else:
-        if traditional:
-            attr_name = 'traditional'
-        else:
-            attr_name = 'simplified'
-
+        attr_name = 'traditional' if traditional else 'simplified'
     result = ''.join([getattr(s, attr_name) for s in result_symbols])
 
     # if not use_zeros:
@@ -493,11 +496,11 @@ class Fraction:
 
     def chntext2fraction(self):
         denominator, numerator = self.chntext.split('分之')
-        return chn2num(numerator) + '/' + chn2num(denominator)
+        return f'{chn2num(numerator)}/{chn2num(denominator)}'
 
     def fraction2chntext(self):
         numerator, denominator = self.fraction.split('/')
-        return num2chn(denominator) + '分之' + num2chn(numerator)
+        return f'{num2chn(denominator)}分之{num2chn(numerator)}'
 
 
 class Date:
@@ -537,14 +540,14 @@ class Date:
         date = self.date
         try:
             year, other = date.strip().split('年', 1)
-            year = Digit(digit=year).digit2chntext() + '年'
+            year = f'{Digit(digit=year).digit2chntext()}年'
         except ValueError:
             other = date
             year = ''
         if other:
             try:
                 month, day = other.strip().split('月', 1)
-                month = Cardinal(cardinal=month).cardinal2chntext() + '月'
+                month = f'{Cardinal(cardinal=month).cardinal2chntext()}月'
             except ValueError:
                 day = date
                 month = ''
@@ -573,8 +576,7 @@ class Money:
     def money2chntext(self):
         money = self.money
         pattern = re.compile(r'(\d+(\.\d+)?)')
-        matchers = pattern.findall(money)
-        if matchers:
+        if matchers := pattern.findall(money):
             for matcher in matchers:
                 money = money.replace(matcher[0], Cardinal(cardinal=matcher[0]).cardinal2chntext())
         self.chntext = money
@@ -602,17 +604,16 @@ class Percentage:
 # ================================================================================ #
 class NSWNormalizer:
     def __init__(self, raw_text):
-        self.raw_text = '^' + raw_text + '$'
+        self.raw_text = f'^{raw_text}$'
         self.norm_text = ''
 
     def _particular(self):
         text = self.norm_text
         pattern = re.compile(r"(([a-zA-Z]+)二([a-zA-Z]+))")
-        matchers = pattern.findall(text)
-        if matchers:
+        if matchers := pattern.findall(text):
             # print('particular')
             for matcher in matchers:
-                text = text.replace(matcher[0], matcher[1] + '2' + matcher[2], 1)
+                text = text.replace(matcher[0], f'{matcher[1]}2{matcher[2]}', 1)
         self.norm_text = text
         return self.norm_text
 
@@ -621,16 +622,14 @@ class NSWNormalizer:
 
         # 规范化日期
         pattern = re.compile(r"\D+((([089]\d|(19|20)\d{2})年)?(\d{1,2}月(\d{1,2}[日号])?)?)")
-        matchers = pattern.findall(text)
-        if matchers:
+        if matchers := pattern.findall(text):
             # print('date')
             for matcher in matchers:
                 text = text.replace(matcher[0], Date(date=matcher[0]).date2chntext(), 1)
 
         # 规范化金钱
         pattern = re.compile(r"\D+((\d+(\.\d+)?)[多余几]?" + CURRENCY_UNITS + r"(\d" + CURRENCY_UNITS + r"?)?)")
-        matchers = pattern.findall(text)
-        if matchers:
+        if matchers := pattern.findall(text):
             # print('money')
             for matcher in matchers:
                 text = text.replace(matcher[0], Money(money=matcher[0]).money2chntext(), 1)
@@ -642,23 +641,20 @@ class NSWNormalizer:
         # 联通：130、131、132、156、155、186、185、176
         # 电信：133、153、189、180、181、177
         pattern = re.compile(r"\D((\+?86 ?)?1([38]\d|5[0-35-9]|7[678]|9[89])\d{8})\D")
-        matchers = pattern.findall(text)
-        if matchers:
+        if matchers := pattern.findall(text):
             # print('telephone')
             for matcher in matchers:
                 text = text.replace(matcher[0], TelePhone(telephone=matcher[0]).telephone2chntext(), 1)
         # 固话
         pattern = re.compile(r"\D((0(10|2[1-3]|[3-9]\d{2})-?)?[1-9]\d{6,7})\D")
-        matchers = pattern.findall(text)
-        if matchers:
+        if matchers := pattern.findall(text):
             # print('fixed telephone')
             for matcher in matchers:
                 text = text.replace(matcher[0], TelePhone(telephone=matcher[0]).telephone2chntext(fixed=True), 1)
 
         # 规范化分数
         pattern = re.compile(r"(\d+/\d+)")
-        matchers = pattern.findall(text)
-        if matchers:
+        if matchers := pattern.findall(text):
             # print('fraction')
             for matcher in matchers:
                 text = text.replace(matcher, Fraction(fraction=matcher).fraction2chntext(), 1)
@@ -666,32 +662,28 @@ class NSWNormalizer:
         # 规范化百分数
         text = text.replace('％', '%')
         pattern = re.compile(r"(\d+(\.\d+)?%)")
-        matchers = pattern.findall(text)
-        if matchers:
+        if matchers := pattern.findall(text):
             # print('percentage')
             for matcher in matchers:
                 text = text.replace(matcher[0], Percentage(percentage=matcher[0]).percentage2chntext(), 1)
 
         # 规范化纯数+量词
         pattern = re.compile(r"(\d+(\.\d+)?)[多余几]?" + COM_QUANTIFIERS)
-        matchers = pattern.findall(text)
-        if matchers:
+        if matchers := pattern.findall(text):
             # print('cardinal+quantifier')
             for matcher in matchers:
                 text = text.replace(matcher[0], Cardinal(cardinal=matcher[0]).cardinal2chntext(), 1)
 
         # 规范化数字编号
         pattern = re.compile(r"(\d{4,32})")
-        matchers = pattern.findall(text)
-        if matchers:
+        if matchers := pattern.findall(text):
             # print('digit')
             for matcher in matchers:
                 text = text.replace(matcher, Digit(digit=matcher).digit2chntext(), 1)
 
         # 规范化纯数
         pattern = re.compile(r"(\d+(\.\d+)?)")
-        matchers = pattern.findall(text)
-        if matchers:
+        if matchers := pattern.findall(text):
             # print('cardinal')
             for matcher in matchers:
                 text = text.replace(matcher[0], Cardinal(cardinal=matcher[0]).cardinal2chntext(), 1)
@@ -710,8 +702,8 @@ class NSWNormalizer:
 
 
 def nsw_test_case(raw_text):
-    print('I:' + raw_text)
-    print('O:' + NSWNormalizer(raw_text).normalize())
+    print(f'I:{raw_text}')
+    print(f'O:{NSWNormalizer(raw_text).normalize()}')
     print('')
 
 
@@ -755,10 +747,7 @@ if __name__ == '__main__':
         if args.has_key:
             cols = l.split(maxsplit=1)
             key = cols[0]
-            if len(cols) == 2:
-                text = cols[1]
-            else:
-                text = ''
+            text = cols[1] if len(cols) == 2 else ''
         else:
             text = l
 
@@ -782,9 +771,9 @@ if __name__ == '__main__':
 
         n += 1
         if n % args.log_interval == 0:
-            sys.stderr.write("text norm: {} lines done.\n".format(n))
+            sys.stderr.write(f"text norm: {n} lines done.\n")
 
-    sys.stderr.write("text norm: {} lines done in total.\n".format(n))
+    sys.stderr.write(f"text norm: {n} lines done in total.\n")
 
     ifile.close()
     ofile.close()

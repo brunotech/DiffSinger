@@ -43,9 +43,7 @@ def design_prototype_filter(taps=62, cutoff_ratio=0.15, beta=9.0):
 
     # apply kaiser window
     w = kaiser(taps + 1, beta)
-    h = h_i * w
-
-    return h
+    return h_i * w
 
 
 class PQMF(torch.nn.Module):

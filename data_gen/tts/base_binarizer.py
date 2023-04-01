@@ -28,10 +28,10 @@ class BaseBinarizer:
         self.pre_align_args = hparams['pre_align_args']
         self.forced_align = self.pre_align_args['forced_align']
         tg_dir = None
-        if self.forced_align == 'mfa':
-            tg_dir = 'mfa_outputs'
         if self.forced_align == 'kaldi':
             tg_dir = 'kaldi_outputs'
+        elif self.forced_align == 'mfa':
+            tg_dir = 'mfa_outputs'
         self.item2txt = {}
         self.item2ph = {}
         self.item2wavfn = {}
@@ -62,19 +62,16 @@ class BaseBinarizer:
 
     @property
     def valid_item_names(self):
-        return self.item_names[0: hparams['test_num']+hparams['valid_num']]  #
+        return self.item_names[:hparams['test_num']+hparams['valid_num']]
 
     @property
     def test_item_names(self):
-        return self.item_names[0: hparams['test_num']]  # Audios for MOS testing are in 'test_ids'
+        return self.item_names[:hparams['test_num']]
 
     def build_spk_map(self):
-        spk_map = set()
-        for item_name in self.item_names:
-            spk_name = self.item2spk[item_name]
-            spk_map.add(spk_name)
+        spk_map = {self.item2spk[item_name] for item_name in self.item_names}
         spk_map = {x: i for i, x in enumerate(sorted(list(spk_map)))}
-        assert len(spk_map) == 0 or len(spk_map) <= hparams['num_spk'], len(spk_map)
+        assert not spk_map or len(spk_map) <= hparams['num_spk'], len(spk_map)
         return spk_map
 
     def item_name2spk_id(self, item_name):
@@ -122,7 +119,6 @@ class BaseBinarizer:
 
     def process_data(self, prefix):
         data_dir = hparams['binary_data_dir']
-        args = []
         builder = IndexedDatasetBuilder(f'{data_dir}/{prefix}')
         lengths = []
         f0s = []
@@ -131,15 +127,17 @@ class BaseBinarizer:
             voice_encoder = VoiceEncoder().cuda()
 
         meta_data = list(self.meta_data(prefix))
-        for m in meta_data:
-            args.append(list(m) + [self.phone_encoder, self.binarization_args])
+        args = [
+            list(m) + [self.phone_encoder, self.binarization_args]
+            for m in meta_data
+        ]
         num_workers = int(os.getenv('N_PROC', os.cpu_count() // 3))
         for f_id, (_, item) in enumerate(
                 zip(tqdm(meta_data), chunked_multiprocess_run(self.process_item, args, num_workers=num_workers))):
             if item is None:
                 continue
             item['spk_embed'] = voice_encoder.embed_utterance(item['wav']) \
-                if self.binarization_args['with_spk_embed'] else None
+                    if self.binarization_args['with_spk_embed'] else None
             if not self.binarization_args['with_wav'] and 'wav' in item:
                 print("del wav")
                 del item['wav']
@@ -150,7 +148,7 @@ class BaseBinarizer:
                 f0s.append(item['f0'])
         builder.finalize()
         np.save(f'{data_dir}/{prefix}_lengths.npy', lengths)
-        if len(f0s) > 0:
+        if f0s:
             f0s = np.concatenate(f0s, 0)
             f0s = f0s[f0s != 0]
             np.save(f'{data_dir}/{prefix}_f0s_mean_std.npy', [np.mean(f0s).item(), np.std(f0s).item()])
@@ -176,7 +174,7 @@ class BaseBinarizer:
                     phone_encoded = res['phone'] = encoder.encode(ph)
                 except:
                     traceback.print_exc()
-                    raise BinarizationError(f"Empty phoneme")
+                    raise BinarizationError("Empty phoneme")
                 if binarization_args['with_align']:
                     cls.get_align(tg_fn, ph, mel, phone_encoded, res)
         except BinarizationError as e:
@@ -189,7 +187,7 @@ class BaseBinarizer:
         if tg_fn is not None and os.path.exists(tg_fn):
             mel2ph, dur = get_mel2ph(tg_fn, ph, mel, hparams)
         else:
-            raise BinarizationError(f"Align not found")
+            raise BinarizationError("Align not found")
         if mel2ph.max() - 1 >= len(phone_encoded):
             raise BinarizationError(
                 f"Align does not match: mel2ph.max() - 1: {mel2ph.max() - 1}, len(phone_encoded): {len(phone_encoded)}")

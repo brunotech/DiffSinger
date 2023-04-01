@@ -33,10 +33,9 @@ class PeDataset(BaseDataset):
         else:
             hparams['f0_mean'], hparams['f0_std'] = self.f0_mean, self.f0_std = None, None
 
-        if prefix == 'test':
-            if hparams['num_test_samples'] > 0:
-                self.avail_idxs = list(range(hparams['num_test_samples'])) + hparams['test_ids']
-                self.sizes = [self.sizes[i] for i in self.avail_idxs]
+        if prefix == 'test' and hparams['num_test_samples'] > 0:
+            self.avail_idxs = list(range(hparams['num_test_samples'])) + hparams['test_ids']
+            self.sizes = [self.sizes[i] for i in self.avail_idxs]
 
     def _get_item(self, index):
         if hasattr(self, 'avail_idxs') and self.avail_idxs is not None:
@@ -53,19 +52,17 @@ class PeDataset(BaseDataset):
         # mel2ph = torch.LongTensor(item['mel2ph'])[:max_frames] if 'mel2ph' in item else None
         f0, uv = norm_interp_f0(item["f0"][:max_frames], hparams)
         pitch = torch.LongTensor(item.get("pitch"))[:max_frames]
-        # print(item.keys(), item['mel'].shape, spec.shape)
-        sample = {
+        return {
             "id": index,
             "item_name": item['item_name'],
             "text": item['txt'],
             "mel": spec,
-            "pitch": pitch, # discrete f0
+            "pitch": pitch,  # discrete f0
             "f0": f0,
             "uv": uv,
             # "mel2ph": mel2ph,
             # "mel_nonpadding": spec.abs().sum(-1) > 0,
         }
-        return sample
 
     def collater(self, samples):
         if len(samples) == 0:
@@ -78,11 +75,7 @@ class PeDataset(BaseDataset):
         uv = utils.collate_1d([s['uv'] for s in samples])
         mels = utils.collate_2d([s['mel'] for s in samples], 0.0)
         mel_lengths = torch.LongTensor([s['mel'].shape[0] for s in samples])
-        # mel2ph = utils.collate_1d([s['mel2ph'] for s in samples], 0.0) \
-        #     if samples[0]['mel2ph'] is not None else None
-        # mel_nonpaddings = utils.collate_1d([s['mel_nonpadding'].float() for s in samples], 0.0)
-
-        batch = {
+        return {
             'id': id,
             'item_name': item_names,
             'nsamples': len(samples),
@@ -95,7 +88,6 @@ class PeDataset(BaseDataset):
             'f0': f0,
             'uv': uv,
         }
-        return batch
 
 
 class PitchExtractionTask(FastSpeech2Task):
@@ -110,13 +102,16 @@ class PitchExtractionTask(FastSpeech2Task):
     #     return torch.optim.lr_scheduler.StepLR(optimizer, hparams['decay_steps'], gamma=0.5)
     def _training_step(self, sample, batch_idx, _):
         loss_output = self.run_model(self.model, sample)
-        total_loss = sum([v for v in loss_output.values() if isinstance(v, torch.Tensor) and v.requires_grad])
+        total_loss = sum(
+            v
+            for v in loss_output.values()
+            if isinstance(v, torch.Tensor) and v.requires_grad
+        )
         loss_output['batch_size'] = sample['mels'].size()[0]
         return total_loss, loss_output
 
     def validation_step(self, sample, batch_idx):
-        outputs = {}
-        outputs['losses'] = {}
+        outputs = {'losses': {}}
         outputs['losses'], model_out = self.run_model(self.model, sample, return_output=True, infer=True)
         outputs['total_loss'] = sum(outputs['losses'].values())
         outputs['nsamples'] = sample['nsamples']
@@ -131,10 +126,7 @@ class PitchExtractionTask(FastSpeech2Task):
         output = model(sample['mels'])
         losses = {}
         self.add_pitch_loss(output, sample, losses)
-        if not return_output:
-            return losses
-        else:
-            return losses, output
+        return (losses, output) if return_output else losses
 
     def plot_pitch(self, batch_idx, model_out, sample):
         gt_f0 = denorm_f0(sample['f0'], sample['uv'], hparams)

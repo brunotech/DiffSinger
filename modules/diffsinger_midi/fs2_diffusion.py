@@ -163,9 +163,9 @@ class FastSpeech2DiffusionMIDI(FastSpeech2):
 
         if enable_pitch_flow:
             diff_scale = 3.
-            # diff_scale = 5.
-            sigma_f0 = 0.3
             if infer: # inference stage
+                # diff_scale = 5.
+                sigma_f0 = 0.3
                 z = torch.randn([decoder_inp.shape[0], 1, decoder_inp.shape[1]]).to(f0.device) * sigma_f0
                 pred_pitch = f0_to_coarse(f0_denorm)  # start from 0
                 pred_pitch_embed = self.pitch_embed(pred_pitch)
@@ -173,10 +173,10 @@ class FastSpeech2DiffusionMIDI(FastSpeech2):
                 decoder_inp = decoder_inp.transpose(1,2)
                 decoder_inp = torch.cat([decoder_inp, pred_f0_encoding], dim=1)
                 spk_emb = torch.zeros([decoder_inp.shape[0], 0]).to(decoder_inp.device)
-                ret['f0_midi'] = norm_f0(ret['f0_midi'], uv, hparams, pitch_padding) 
+                ret['f0_midi'] = norm_f0(ret['f0_midi'], uv, hparams, pitch_padding)
                 pitch_flow_ret = self.pitch_flow(decoder_inp, ret={'f0_midi':ret['f0_midi'] / diff_scale}, infer=True)
                 pred_sample = pitch_flow_ret['f0_out'].squeeze(-1)
-                
+
                 if hparams.get("fit_midi_f0") is not None and hparams['fit_midi_f0'] is True:
                     mel2f0_midi = kwargs['mel2f0_midi']
                     f0_refined = denorm_f0(pred_sample * diff_scale, uv, hparams, pitch_padding=pitch_padding) 
@@ -192,7 +192,7 @@ class FastSpeech2DiffusionMIDI(FastSpeech2):
                 pred_f0 = pitch_pred[:, :, 0]
                 pred_uv = pitch_pred[:, :, 1] > 0
                 pred_f0 = denorm_f0(pred_f0, gt_uv, hparams, pitch_padding=pitch_padding)
-                
+
                 pred_pitch = f0_to_coarse(pred_f0)  # start from 0
                 pred_pitch_embed = self.pitch_embed(pred_pitch)
 
@@ -218,8 +218,7 @@ class FastSpeech2DiffusionMIDI(FastSpeech2):
                     gt_sample = gt_sample + f0_uv_bias
 
                 lens = (mel2ph != 0).long().sum(dim=-1)
-                if lens[-1] < mel2ph.shape[-1]:
-                    lens[-1] = mel2ph.shape[-1] # lens_max must match the mel dim 
+                lens[-1] = max(lens[-1], mel2ph.shape[-1])
                 spk_emb = torch.zeros([decoder_inp.shape[0], 0]).to(decoder_inp.device)
                 pitch_flow_ret = self.pitch_flow(decoder_inp, f0=gt_sample,mel2ph=mel2ph, ret={}, infer=False)
                 ret['loss_diff'] = pitch_flow_ret['diff_loss']

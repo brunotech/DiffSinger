@@ -237,8 +237,7 @@ class TokenTextEncoder(TextEncoder):
             tokens = [token.strip() for token in f.readlines()]
 
         def token_gen():
-            for token in tokens:
-                yield token
+            yield from tokens
 
         self._init_vocab(token_gen(), add_reserved_tokens=False)
 
@@ -265,15 +264,14 @@ class TokenTextEncoder(TextEncoder):
         non_reserved_start_index = 0
 
         if add_reserved_tokens:
-            self._id_to_token.update(enumerate(RESERVED_TOKENS))
+            self._id_to_token |= enumerate(RESERVED_TOKENS)
             non_reserved_start_index = len(RESERVED_TOKENS)
 
         self._id_to_token.update(
             enumerate(token_generator, start=non_reserved_start_index))
 
         # _token_to_id is the reverse of _id_to_token
-        self._token_to_id = dict((v, k)
-                                for k, v in six.iteritems(self._id_to_token))
+        self._token_to_id = {v: k for k, v in six.iteritems(self._id_to_token)}
 
     def pad(self):
         return self.pad_index

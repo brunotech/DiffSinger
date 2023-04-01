@@ -28,8 +28,7 @@ def default(val, d):
 
 def cycle(dl):
     while True:
-        for data in dl:
-            yield data
+        yield from dl
 
 
 def num_to_groups(num, divisor):
@@ -386,13 +385,13 @@ class GaussianDiffusion(nn.Module):
                     x = self.p_sample_plms(x, torch.full((b,), i, device=device, dtype=torch.long), iteration_interval,
                                            cond)
             elif hparams.get('infer_with_ref') is True:
-                for i in tqdm(reversed(range(0, t)), desc='sample time step', total=t):
+                for i in tqdm(reversed(range(t)), desc='sample time step', total=t):
                     x = self.p_sample_with_ref(x, torch.full((b,), i, device=device, dtype=torch.long), cond, x_ref=ret['f0_midi'], clip_denoised=False)
-            
+
             else:
-                for i in tqdm(reversed(range(0, t)), desc='sample time step', total=t):
+                for i in tqdm(reversed(range(t)), desc='sample time step', total=t):
                     x = self.p_sample(x, torch.full((b,), i, device=device, dtype=torch.long), cond, clip_denoised=False)
-           
+
             x = x[:, 0].transpose(1, 2)
             ret['f0_out'] = x
         return ret

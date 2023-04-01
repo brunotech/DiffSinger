@@ -81,9 +81,7 @@ def _is_batch_full(batch, num_tokens, max_tokens, max_sentences):
         return 0
     if len(batch) == max_sentences:
         return 1
-    if num_tokens > max_tokens:
-        return 1
-    return 0
+    return 1 if num_tokens > max_tokens else 0
 
 
 def batch_by_size(
@@ -121,10 +119,9 @@ def batch_by_size(
         num_tokens = num_tokens_fn(idx)
         sample_lens.append(num_tokens)
         sample_len = max(sample_len, num_tokens)
-        assert sample_len <= max_tokens, (
-            "sentence at index {} of size {} exceeds max_tokens "
-            "limit of {}!".format(idx, sample_len, max_tokens)
-        )
+        assert (
+            sample_len <= max_tokens
+        ), f"sentence at index {idx} of size {sample_len} exceeds max_tokens limit of {max_tokens}!"
         num_tokens = (len(batch) + 1) * sample_len
 
         if _is_batch_full(batch, num_tokens, max_tokens, max_sentences):
@@ -212,7 +209,7 @@ def load_ckpt(cur_model, ckpt_base_dir, prefix_in_ckpt='model', force=True, stri
 def remove_padding(x, padding_idx=0):
     if x is None:
         return None
-    assert len(x.shape) in [1, 2]
+    assert len(x.shape) in {1, 2}
     if len(x.shape) == 2:  # [T, H]
         return x[np.abs(x).sum(-1) != padding_idx]
     elif len(x.shape) == 1:  # [T]
@@ -244,7 +241,7 @@ def print_arch(model, model_name='model'):
 
 def num_params(model, print_out=True, model_name="model"):
     parameters = filter(lambda p: p.requires_grad, model.parameters())
-    parameters = sum([np.prod(p.size()) for p in parameters]) / 1_000_000
+    parameters = sum(np.prod(p.size()) for p in parameters) / 1_000_000
     if print_out:
         print(f'| {model_name} Trainable Parameters: %.3fM' % parameters)
     return parameters

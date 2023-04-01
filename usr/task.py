@@ -30,9 +30,13 @@ class DiffFsTask(FastSpeech2Task):
         f0 = sample['f0']
         uv = sample['uv']
         energy = sample['energy']
-        spk_embed = sample.get('spk_embed') if not hparams['use_spk_id'] else sample.get('spk_ids')
+        spk_embed = (
+            sample.get('spk_ids')
+            if hparams['use_spk_id']
+            else sample.get('spk_embed')
+        )
         if hparams['pitch_type'] == 'cwt':
-            cwt_spec = sample[f'cwt_spec']
+            cwt_spec = sample['cwt_spec']
             f0_mean = sample['f0_mean']
             f0_std = sample['f0_std']
             sample['f0_cwt'] = f0 = model.cwt2f0_norm(cwt_spec, f0_mean, f0_std, mel2ph)
@@ -48,21 +52,21 @@ class DiffFsTask(FastSpeech2Task):
             self.add_pitch_loss(output, sample, losses)
         if hparams['use_energy_embed']:
             self.add_energy_loss(output['energy_pred'], energy, losses)
-        if not return_output:
-            return losses
-        else:
-            return losses, output
+        return (losses, output) if return_output else losses
 
     def _training_step(self, sample, batch_idx, _):
         log_outputs = self.run_model(self.model, sample)
-        total_loss = sum([v for v in log_outputs.values() if isinstance(v, torch.Tensor) and v.requires_grad])
+        total_loss = sum(
+            v
+            for v in log_outputs.values()
+            if isinstance(v, torch.Tensor) and v.requires_grad
+        )
         log_outputs['batch_size'] = sample['txt_tokens'].size()[0]
         log_outputs['lr'] = self.scheduler.get_lr()[0]
         return total_loss, log_outputs
 
     def validation_step(self, sample, batch_idx):
-        outputs = {}
-        outputs['losses'] = {}
+        outputs = {'losses': {}}
         outputs['losses'], model_out = self.run_model(self.model, sample, return_output=True, infer=False)
         outputs['total_loss'] = sum(outputs['losses'].values())
         outputs['nsamples'] = sample['nsamples']

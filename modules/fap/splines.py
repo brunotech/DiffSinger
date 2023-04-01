@@ -61,8 +61,6 @@ def piecewise_linear_transform(x, q_tilde, compute_jacobian=True,
         - `y` is a tensor with shape (N,k) living in the k-dimensional unit hypercube
         - `j` is the jacobian of the transformation with shape (N,) if compute_jacobian==True, else None.
     """
-    logj = None
-
     # TODO bottom-up assesment of handling the differentiability of variables
     # Compute the bin width w
     N, k, b = q_tilde.shape
@@ -114,9 +112,7 @@ def piecewise_linear_transform(x, q_tilde, compute_jacobian=True,
         out = out * (1-oob_mask) + x * oob_mask
         slopes = slopes * (1-oob_mask) + oob_mask
 
-    if compute_jacobian:
-        #logj = torch.log(torch.prod(slopes.float(), 1))
-        logj = torch.sum(torch.log(slopes), 1)
+    logj = torch.sum(torch.log(slopes), 1) if compute_jacobian else None
     del slopes
 
     return out, logj
@@ -210,11 +206,7 @@ def piecewise_linear_inverse_transform(y, q_tilde, compute_jacobian=True,
         x = x * (1-oob_mask) + y * oob_mask
         q = q * (1-oob_mask) + oob_mask
 
-    # Prepare the jacobian
-    logj = None
-    if compute_jacobian:
-        #logj = - torch.log(torch.prod(q, 1))
-        logj = -torch.sum(torch.log(q.float()), 1)
+    logj = -torch.sum(torch.log(q.float()), 1) if compute_jacobian else None
     return x.detach(), logj
 
 
@@ -282,13 +274,11 @@ def piecewise_quadratic_transform(x, w_tilde, v_tilde, inverse=False):
     cdf_shift = F.pad(cdf, (1,0), 'constant', 0)
 
     with torch.no_grad(): # Add by yerfor to prevent torch bug.
-        if not inverse:
-            # * x D x 1, (w_cumsum[idx-1] < x <= w_cumsum[idx])
-            bin_index = torch.searchsorted(w_cumsum, x.unsqueeze(-1))
-        else:
-            # * x D x 1, (cdf[idx-1] < x <= cdf[idx])
-            bin_index = torch.searchsorted(cdf, x.unsqueeze(-1))
-
+        bin_index = (
+            torch.searchsorted(cdf, x.unsqueeze(-1))
+            if inverse
+            else torch.searchsorted(w_cumsum, x.unsqueeze(-1))
+        )
     w_b = torch.gather(w, -1, bin_index).squeeze(-1)
     w_bn1 = torch.gather(w_cumsum_shift, -1, bin_index).squeeze(-1)
     v_b = torch.gather(v, -1, bin_index).squeeze(-1)

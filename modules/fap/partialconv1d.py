@@ -65,7 +65,4 @@ class PartialConv1d(nn.Conv1d):
         else:
             output = torch.mul(raw_out, self.mask_ratio)
 
-        if self.return_mask:
-            return output, self.update_mask
-        else:
-            return output
+        return (output, self.update_mask) if self.return_mask else output

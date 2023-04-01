@@ -28,8 +28,7 @@ def default(val, d):
 
 def cycle(dl):
     while True:
-        for data in dl:
-            yield data
+        yield from dl
 
 
 def num_to_groups(num, divisor):

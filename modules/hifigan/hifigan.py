@@ -134,7 +134,7 @@ class HifiGanGenerator(torch.nn.Module):
         self.resblocks = nn.ModuleList()
         for i in range(len(self.ups)):
             ch = h['upsample_initial_channel'] // (2 ** (i + 1))
-            for j, (k, d) in enumerate(zip(h['resblock_kernel_sizes'], h['resblock_dilation_sizes'])):
+            for k, d in zip(h['resblock_kernel_sizes'], h['resblock_dilation_sizes']):
                 self.resblocks.append(resblock(h, ch, k, d))
 
         self.conv_post = weight_norm(Conv1d(ch, c_out, 7, 1, padding=3))
@@ -239,7 +239,7 @@ class MultiPeriodDiscriminator(torch.nn.Module):
         y_d_gs = []
         fmap_rs = []
         fmap_gs = []
-        for i, d in enumerate(self.discriminators):
+        for d in self.discriminators:
             y_d_r, fmap_r = d(y, mel)
             y_d_g, fmap_g = d(y_hat, mel)
             y_d_rs.append(y_d_r)

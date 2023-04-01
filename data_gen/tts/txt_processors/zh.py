@@ -28,14 +28,17 @@ class TxtProcessor(BaseTxtProcessor):
         shengmu = pinyin(txt, style=Style.INITIALS)  # https://blog.csdn.net/zhoulei124/article/details/89055403
         yunmu_finals = pinyin(txt, style=Style.FINALS)
         yunmu_tone3 = pinyin(txt, style=Style.FINALS_TONE3)
-        yunmu = [[t[0] + '5'] if t[0] == f[0] else t for f, t in zip(yunmu_finals, yunmu_tone3)] \
-            if pre_align_args['use_tone'] else yunmu_finals
+        yunmu = (
+            [
+                [f'{t[0]}5'] if t[0] == f[0] else t
+                for f, t in zip(yunmu_finals, yunmu_tone3)
+            ]
+            if pre_align_args['use_tone']
+            else yunmu_finals
+        )
 
         assert len(shengmu) == len(yunmu)
         phs = ["|"]
         for a, b, c in zip(shengmu, yunmu, yunmu_finals):
-            if a[0] == c[0]:
-                phs += [a[0], "|"]
-            else:
-                phs += [a[0], b[0], "|"]
+            phs += [a[0], "|"] if a[0] == c[0] else [a[0], b[0], "|"]
         return phs, txt

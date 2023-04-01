@@ -64,7 +64,7 @@ class PositionwiseConvFF(nn.Module):
             core_out = core_out.transpose(1, 2)
 
             # residual connection
-            output = core_out + inp
+            return core_out + inp
         else:
             # positionwise feed-forward
             core_out = inp.transpose(1, 2)
@@ -72,9 +72,7 @@ class PositionwiseConvFF(nn.Module):
             core_out = core_out.transpose(1, 2)
 
             # residual connection + layer normalization
-            output = self.layer_norm(inp + core_out).to(inp.dtype)
-
-        return output
+            return self.layer_norm(inp + core_out).to(inp.dtype)
 
 
 class MultiHeadAttn(nn.Module):

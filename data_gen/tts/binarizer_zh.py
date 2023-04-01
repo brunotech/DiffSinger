@@ -15,7 +15,7 @@ class ZhBinarizer(BaseBinarizer):
         if tg_fn is not None and os.path.exists(tg_fn):
             _, dur = get_mel2ph(tg_fn, ph, mel, hparams)
         else:
-            raise BinarizationError(f"Align not found")
+            raise BinarizationError("Align not found")
         ph_list = ph.split(" ")
         assert len(dur) == len(ph_list)
         mel2ph = []

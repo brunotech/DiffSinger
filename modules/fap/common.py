@@ -80,7 +80,7 @@ def update_params(config, params):
             print(f"overriding {k} with {v}")
             config[k] = v
         else:
-            print("{}, {} params not updated".format(k, v))
+            print(f"{k}, {v} params not updated")
 
 
 def get_mask_from_lengths(lengths):
@@ -93,8 +93,7 @@ def get_mask_from_lengths(lengths):
     """
     max_len = torch.max(lengths).item()
     ids = torch.arange(0, max_len, out=torch.cuda.LongTensor(max_len))
-    mask = (ids < lengths.unsqueeze(1)).bool()
-    return mask
+    return (ids < lengths.unsqueeze(1)).bool()
 
 
 class ExponentialClass(torch.nn.Module):
@@ -130,9 +129,7 @@ class ConvNorm(torch.nn.Module):
         self.dilation = dilation
         self.use_partial_padding = use_partial_padding
         self.use_weight_norm = use_weight_norm
-        conv_fn = torch.nn.Conv1d
-        if self.use_partial_padding:
-            conv_fn = pconv1d
+        conv_fn = pconv1d if self.use_partial_padding else torch.nn.Conv1d
         self.conv = conv_fn(in_channels, out_channels,
                             kernel_size=kernel_size, stride=stride,
                             padding=padding, dilation=dilation,
@@ -177,8 +174,7 @@ class LengthRegulator(nn.Module):
         for x_i, dur_i in zip(x, dur):
             expanded = self.expand(x_i, dur_i)
             output.append(expanded)
-        output = self.pad(output)
-        return output
+        return self.pad(output)
 
     def expand(self, x, dur):
         output = []
@@ -186,18 +182,16 @@ class LengthRegulator(nn.Module):
             expanded_len = int(dur[i] + 0.5)
             expanded = frame.expand(expanded_len, -1)
             output.append(expanded)
-        output = torch.cat(output, 0)
-        return output
+        return torch.cat(output, 0)
 
     def pad(self, x):
         output = []
-        max_len = max([x[i].size(0) for i in range(len(x))])
-        for i, seq in enumerate(x):
+        max_len = max(x[i].size(0) for i in range(len(x)))
+        for seq in x:
             padded = F.pad(
                 seq, [0, 0, 0, max_len - seq.size(0)], 'constant', 0.0)
             output.append(padded)
-        output = torch.stack(output)
-        return output
+        return torch.stack(output)
 
 
 class ConvLSTMLinear(nn.Module):
@@ -719,13 +713,12 @@ class SplineTransformationLayer(torch.nn.Module):
                     inverse=inverse)
                 if not inverse:
                     log_s = torch.sum(log_s, 1)
+            elif inverse:
+                z_1_tformed, _dc = self.inv_spline_fn(
+                    z_1_reshaped.float(), q_tilde.float(), False)
             else:
-                if inverse:
-                    z_1_tformed, _dc = self.inv_spline_fn(
-                        z_1_reshaped.float(), q_tilde.float(), False)
-                else:
-                    z_1_tformed, log_s = self.spline_fn(
-                        z_1_reshaped.float(), q_tilde.float())
+                z_1_tformed, log_s = self.spline_fn(
+                    z_1_reshaped.float(), q_tilde.float())
 
         z_1 = z_1_tformed.reshape(b_s, t_s, -1).permute(0, 2, 1)
 
@@ -738,7 +731,7 @@ class SplineTransformationLayer(torch.nn.Module):
             z_1 = z_1 * (self.top - self.bottom) + self.bottom
             z = torch.cat((z_0, z_1), dim=1)
             log_s = log_s.reshape(b_s, t_s).unsqueeze(1) + \
-                n_half*(np.log(self.top - self.bottom) -
+                    n_half*(np.log(self.top - self.bottom) -
                         np.log(self.right-self.left))
             return z, log_s
 
@@ -750,13 +743,15 @@ class AffineTransformationLayer(torch.nn.Module):
                  n_channels=1024, use_partial_padding=False):
         super(AffineTransformationLayer, self).__init__()
         if affine_model not in ("wavenet", "simple_conv"):
-            raise Exception("{} affine model not supported".format(affine_model))
+            raise Exception(f"{affine_model} affine model not supported")
         if isinstance(scaling_fn, list):
-            if not all([x in ("translate", "exp", "tanh", "sigmoid") for x in scaling_fn]):
-                raise Exception("{} scaling fn not supported".format(scaling_fn))
-        else:
-            if scaling_fn not in ("translate", "exp", "tanh", "sigmoid"):
-                raise Exception("{} scaling fn not supported".format(scaling_fn))
+            if any(
+                x not in ("translate", "exp", "tanh", "sigmoid")
+                for x in scaling_fn
+            ):
+                raise Exception(f"{scaling_fn} scaling fn not supported")
+        elif scaling_fn not in ("translate", "exp", "tanh", "sigmoid"):
+            raise Exception(f"{scaling_fn} scaling fn not supported")
 
         self.affine_model = affine_model
         self.scaling_fn = scaling_fn
@@ -908,10 +903,10 @@ class ConvAttention(torch.nn.Module):
         # B x n_attn_dims x T1 x T2
         attn = (queries_enc[:, :, :, None] - keys_enc[:, :, None])**2
 
-        # compute log-likelihood from gaussian
-        eps = 1e-8
         attn = -temp * attn.sum(1, keepdim=True)
         if attn_prior is not None:
+            # compute log-likelihood from gaussian
+            eps = 1e-8
             attn = self.log_softmax(attn) + torch.log(attn_prior[:, None] + eps)
 
         attn_logprob = attn.clone()

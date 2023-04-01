@@ -141,10 +141,9 @@ def process_utterance(wav_path,
 
     if not return_linear:
         return wav, mel
-    else:
-        spc = audio.amp_to_db(spc)
-        spc = audio.normalize(spc, {'min_level_db': min_level_db})
-        return wav, mel, spc
+    spc = audio.amp_to_db(spc)
+    spc = audio.normalize(spc, {'min_level_db': min_level_db})
+    return wav, mel, spc
 
 
 def get_pitch(wav_data, mel, hparams):
@@ -216,7 +215,7 @@ class TextGrid(object):
         group : extracted info
         """
         try:
-            group = re.match(pattern, self.text[self.line_count]).group(1)
+            group = re.match(pattern, self.text[self.line_count])[1]
             self.line_count += inc
         except AttributeError:
             raise ValueError("File format error at line %d:%s" % (self.line_count, self.text[self.line_count]))
@@ -234,7 +233,7 @@ class TextGrid(object):
 
     def _get_item_list(self):
         """Only supports IntervalTier currently"""
-        for itemIdx in range(1, self.size + 1):
+        for _ in range(1, self.size + 1):
             tier = OrderedDict()
             item_list = []
             tier_idx = self._extract_pattern(r"item \[(.*)\]:", 1)
@@ -245,7 +244,7 @@ class TextGrid(object):
             tier_xmin = self._extract_pattern(r"xmin = (.*)", 1)
             tier_xmax = self._extract_pattern(r"xmax = (.*)", 1)
             tier_size = self._extract_pattern(r"intervals: size = (.*)", 1)
-            for i in range(int(tier_size)):
+            for _ in range(int(tier_size)):
                 item = OrderedDict()
                 item["idx"] = self._extract_pattern(r"intervals \[(.*)\]", 1)
                 item["xmin"] = self._extract_pattern(r"xmin = (.*)", 1)
@@ -281,14 +280,14 @@ def get_mel2ph(tg_fn, ph, mel, hparams):
     split = np.ones(len(ph_list) + 1, np.float) * -1
     tg_idx = 0
     ph_idx = 0
-    tg_align = [x for x in tg['tiers'][-1]['items']]
+    tg_align = list(tg['tiers'][-1]['items'])
     tg_align_ = []
     for x in tg_align:
         x['xmin'] = float(x['xmin'])
         x['xmax'] = float(x['xmax'])
         if x['text'] in ['sil', 'sp', '', 'SIL', 'PUNC']:
             x['text'] = ''
-            if len(tg_align_) > 0 and tg_align_[-1]['text'] == '':
+            if tg_align_ and tg_align_[-1]['text'] == '':
                 tg_align_[-1]['xmax'] = x['xmax']
                 continue
         tg_align_.append(x)

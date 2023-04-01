@@ -154,9 +154,9 @@ class FastSpeech2FlowMIDI(FastSpeech2):
 
         if enable_pitch_flow:
             diff_scale = 3.
-            # diff_scale = 5.
-            sigma_f0 = 0.3
             if infer: # inference stage
+                # diff_scale = 5.
+                sigma_f0 = 0.3
                 z = torch.randn([decoder_inp.shape[0], 1, decoder_inp.shape[1]]).to(f0.device) * sigma_f0
                 pred_pitch = f0_to_coarse(f0_denorm)  # start from 0
                 pred_pitch_embed = self.pitch_embed(pred_pitch)
@@ -181,7 +181,7 @@ class FastSpeech2FlowMIDI(FastSpeech2):
                 pred_f0 = pitch_pred[:, :, 0]
                 pred_uv = pitch_pred[:, :, 1] > 0
                 pred_f0 = denorm_f0(pred_f0, gt_uv, hparams, pitch_padding=pitch_padding)
-                
+
                 pred_pitch = f0_to_coarse(pred_f0)  # start from 0
                 pred_pitch_embed = self.pitch_embed(pred_pitch)
 
@@ -207,8 +207,7 @@ class FastSpeech2FlowMIDI(FastSpeech2):
                     gt_sample = gt_sample + f0_uv_bias
 
                 lens = (mel2ph != 0).long().sum(dim=-1)
-                if lens[-1] < mel2ph.shape[-1]:
-                    lens[-1] = mel2ph.shape[-1] # lens_max must match the mel dim 
+                lens[-1] = max(lens[-1], mel2ph.shape[-1])
                 spk_emb = torch.zeros([decoder_inp.shape[0], 0]).to(decoder_inp.device)
                 pitch_flow_ret = self.pitch_flow(decoder_inp, spk_emb, gt_sample, lens)
                 loss_dict = self.pitch_loss_fn(pitch_flow_ret, lens, uv=None) # todo: 看看不mask会不会更好

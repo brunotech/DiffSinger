@@ -66,9 +66,7 @@ def compute_regression_loss(x_hat, x, mask, name=False):
         loss = F.mse_loss(x_hat, x, reduction='sum')
     loss = loss / mask.sum()
 
-    loss_dict = {"loss_{}".format(name): loss}
-
-    return loss_dict
+    return {f"loss_{name}": loss}
 
 
 class AttributePredictionLoss(torch.nn.Module):
@@ -96,8 +94,10 @@ class AttributePredictionLoss(torch.nn.Module):
                 model_output['z'], model_output['log_det_W_list'],
                 model_output['log_s_list'], n_elements, n_dims, mask,
                 self.sigma)
-            loss_dict = {"loss_{}".format(self.name): (loss, self.loss_weight),
-                         "loss_prior_{}".format(self.name): (loss_prior, 0.0)}
+            loss_dict = {
+                f"loss_{self.name}": (loss, self.loss_weight),
+                f"loss_prior_{self.name}": (loss_prior, 0.0),
+            }
         elif 'x_hat' in model_output:
             loss_dict = compute_regression_loss(
                     model_output['x_hat'], model_output['x'], mask, self.name)
@@ -133,8 +133,7 @@ class AttentionCTCLoss(torch.nn.Module):
                                     input_lengths=query_lens[bid:bid+1],
                                     target_lengths=key_lens[bid:bid+1])
             cost_total += ctc_cost
-        cost = cost_total/attn_logprob.shape[0]
-        return cost
+        return cost_total/attn_logprob.shape[0]
 
 
 class AttentionBinarizationLoss(torch.nn.Module):
@@ -195,11 +194,14 @@ class RADTTSLoss(torch.nn.Module):
             ctc_cost, self.loss_weights['ctc_loss_weight'])
 
         for k in model_output:
-            if k in self.loss_fns:
-                if model_output[k] is not None and len(model_output[k]) > 0:
-                    t_lens = in_lens if 'dur' in k else out_lens
-                    mout = model_output[k]
-                    for loss_name, v in self.loss_fns[k](mout, t_lens).items():
-                        loss_dict[loss_name] = v
+            if (
+                k in self.loss_fns
+                and model_output[k] is not None
+                and len(model_output[k]) > 0
+            ):
+                t_lens = in_lens if 'dur' in k else out_lens
+                mout = model_output[k]
+                for loss_name, v in self.loss_fns[k](mout, t_lens).items():
+                    loss_dict[loss_name] = v
 
         return loss_dict

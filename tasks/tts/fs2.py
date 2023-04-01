@@ -74,13 +74,16 @@ class FastSpeech2Task(TtsTask):
 
     def _training_step(self, sample, batch_idx, _):
         loss_output = self.run_model(self.model, sample)
-        total_loss = sum([v for v in loss_output.values() if isinstance(v, torch.Tensor) and v.requires_grad])
+        total_loss = sum(
+            v
+            for v in loss_output.values()
+            if isinstance(v, torch.Tensor) and v.requires_grad
+        )
         loss_output['batch_size'] = sample['txt_tokens'].size()[0]
         return total_loss, loss_output
 
     def validation_step(self, sample, batch_idx):
-        outputs = {}
-        outputs['losses'] = {}
+        outputs = {'losses': {}}
         outputs['losses'], model_out = self.run_model(self.model, sample, return_output=True)
         outputs['total_loss'] = sum(outputs['losses'].values())
         outputs['nsamples'] = sample['nsamples']
@@ -115,9 +118,13 @@ class FastSpeech2Task(TtsTask):
         f0 = sample['f0']
         uv = sample['uv']
         energy = sample['energy']
-        spk_embed = sample.get('spk_embed') if not hparams['use_spk_id'] else sample.get('spk_ids')
+        spk_embed = (
+            sample.get('spk_ids')
+            if hparams['use_spk_id']
+            else sample.get('spk_embed')
+        )
         if hparams['pitch_type'] == 'cwt':
-            cwt_spec = sample[f'cwt_spec']
+            cwt_spec = sample['cwt_spec']
             f0_mean = sample['f0_mean']
             f0_std = sample['f0_std']
             sample['f0_cwt'] = f0 = model.cwt2f0_norm(cwt_spec, f0_mean, f0_std, mel2ph)
@@ -132,10 +139,7 @@ class FastSpeech2Task(TtsTask):
             self.add_pitch_loss(output, sample, losses)
         if hparams['use_energy_embed']:
             self.add_energy_loss(output['energy_pred'], energy, losses)
-        if not return_output:
-            return losses
-        else:
-            return losses, output
+        return (losses, output) if return_output else losses
 
     ############
     # losses
@@ -143,14 +147,12 @@ class FastSpeech2Task(TtsTask):
     def add_mel_loss(self, mel_out, target, losses, postfix='', mel_mix_loss=None):
         if mel_mix_loss is None:
             for loss_name, lbd in self.loss_and_lambda.items():
-                if 'l1' == loss_name:
+                if loss_name == 'l1':
                     l = self.l1_loss(mel_out, target)
-                elif 'mse' == loss_name:
+                elif loss_name in ['mse', 'gdl']:
                     raise NotImplementedError
-                elif 'ssim' == loss_name:
+                elif loss_name == 'ssim':
                     l = self.ssim_loss(mel_out, target)
-                elif 'gdl' == loss_name:
-                    raise NotImplementedError
                 losses[f'{loss_name}{postfix}'] = l * lbd
         else:
             raise NotImplementedError
@@ -224,14 +226,14 @@ class FastSpeech2Task(TtsTask):
             pitch_loss_fn = F.l1_loss if hparams['pitch_loss'] == 'l1' else F.mse_loss
             losses['f0'] = (pitch_loss_fn(output['pitch_pred'][:, :, 0], sample['f0'],
                                           reduction='none') * nonpadding).sum() \
-                           / nonpadding.sum() * hparams['lambda_f0']
+                               / nonpadding.sum() * hparams['lambda_f0']
             return
         mel2ph = sample['mel2ph']  # [B, T_s]
         f0 = sample['f0']
         uv = sample['uv']
         nonpadding = (mel2ph != 0).float()
         if hparams['pitch_type'] == 'cwt':
-            cwt_spec = sample[f'cwt_spec']
+            cwt_spec = sample['cwt_spec']
             f0_mean = sample['f0_mean']
             f0_std = sample['f0_std']
             cwt_pred = output['cwt'][:, :, :10]
@@ -242,7 +244,7 @@ class FastSpeech2Task(TtsTask):
                 assert output['cwt'].shape[-1] == 11
                 uv_pred = output['cwt'][:, :, -1]
                 losses['uv'] = (F.binary_cross_entropy_with_logits(uv_pred, uv, reduction='none') * nonpadding) \
-                                   .sum() / nonpadding.sum() * hparams['lambda_uv']
+                                       .sum() / nonpadding.sum() * hparams['lambda_uv']
             losses['f0_mean'] = F.l1_loss(f0_mean_pred, f0_mean) * hparams['lambda_f0']
             losses['f0_std'] = F.l1_loss(f0_std_pred, f0_std) * hparams['lambda_f0']
             if hparams['cwt_add_f0_loss']:
@@ -338,19 +340,21 @@ class FastSpeech2Task(TtsTask):
     # infer
     ############
     def test_step(self, sample, batch_idx):
-        spk_embed = sample.get('spk_embed') if not hparams['use_spk_id'] else sample.get('spk_ids')
-        txt_tokens = sample['txt_tokens']
+        spk_embed = (
+            sample.get('spk_ids')
+            if hparams['use_spk_id']
+            else sample.get('spk_embed')
+        )
         mel2ph, uv, f0 = None, None, None
-        ref_mels = None
-        if hparams['profile_infer']:
-            pass
-        else:
+        if not hparams['profile_infer']:
             if hparams['use_gt_dur']:
                 mel2ph = sample['mel2ph']
             if hparams['use_gt_f0']:
                 f0 = sample['f0']
                 uv = sample['uv']
                 print('Here using gt f0!!')
+            txt_tokens = sample['txt_tokens']
+            ref_mels = None
             if hparams.get('use_midi') is not None and hparams['use_midi']:
                 outputs = self.model(
                     txt_tokens, spk_embed=spk_embed, mel2ph=mel2ph, f0=f0, uv=uv, ref_mels=ref_mels, infer=True,

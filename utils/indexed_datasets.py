@@ -59,13 +59,18 @@ if __name__ == "__main__":
     from tqdm import tqdm
     ds_path = '/tmp/indexed_ds_example'
     size = 100
-    items = [{"a": np.random.normal(size=[10000, 10]),
-              "b": np.random.normal(size=[10000, 10])} for i in range(size)]
+    items = [
+        {
+            "a": np.random.normal(size=[10000, 10]),
+            "b": np.random.normal(size=[10000, 10]),
+        }
+        for _ in range(size)
+    ]
     builder = IndexedDatasetBuilder(ds_path)
     for i in tqdm(range(size)):
         builder.add_item(items[i])
     builder.finalize()
     ds = IndexedDataset(ds_path)
-    for i in tqdm(range(10000)):
+    for _ in tqdm(range(10000)):
         idx = random.randint(0, size - 1)
         assert (ds[idx]['a'] == items[idx]['a']).all()

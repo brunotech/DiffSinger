@@ -99,8 +99,7 @@ class PWG(BaseVocoder):
                 p = np.pad(p, (pad_size,), "edge")
                 p = torch.LongTensor(p[None, :]).to(device)
             y = self.model(z, c, p).view(-1)
-        wav_out = y.cpu().numpy()
-        return wav_out
+        return y.cpu().numpy()
 
     @staticmethod
     def wav2spec(wav_fn, return_linear=False):
@@ -116,10 +115,7 @@ class PWG(BaseVocoder):
             loud_norm=hparams['loud_norm'],
             min_level_db=hparams['min_level_db'],
             return_linear=return_linear, vocoder='pwg', eps=float(hparams.get('wav2spec_eps', 1e-10)))
-        if return_linear:
-            return res[0], res[1].T, res[2].T  # [T, 80], [T, n_fft]
-        else:
-            return res[0], res[1].T
+        return (res[0], res[1].T, res[2].T) if return_linear else (res[0], res[1].T)
 
     @staticmethod
     def wav2mfcc(wav_fn):

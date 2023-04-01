@@ -41,10 +41,7 @@ def librosa_pad_lr(x, fsize, fshift, pad_sides=1):
     assert pad_sides in (1, 2)
     # return int(fsize // 2)
     pad = (x.shape[0] // fshift + 1) * fshift - x.shape[0]
-    if pad_sides == 1:
-        return 0, pad
-    else:
-        return pad // 2, pad // 2 + pad % 2
+    return (0, pad) if pad_sides == 1 else (pad // 2, pad // 2 + pad % 2)
 
 
 # Conversions

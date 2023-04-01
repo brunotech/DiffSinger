@@ -42,18 +42,22 @@ class SingingBinarizer(BaseBinarizer):
 
     def split_train_test_set(self, item_names):
         item_names = deepcopy(item_names)
-        test_item_names = [x for x in item_names if any([ts in x for ts in hparams['test_prefixes']])]
+        test_item_names = [
+            x
+            for x in item_names
+            if any(ts in x for ts in hparams['test_prefixes'])
+        ]
         train_item_names = [x for x in item_names if x not in set(test_item_names)]
-        logging.info("train {}".format(len(train_item_names)))
-        logging.info("test {}".format(len(test_item_names)))
+        logging.info(f"train {len(train_item_names)}")
+        logging.info(f"test {len(test_item_names)}")
         return train_item_names, test_item_names
 
     def load_meta_data(self):
+        wav_suffix = '_wf0.wav'
+        txt_suffix = '.txt'
+        ph_suffix = '_ph.txt'
+        tg_suffix = '.TextGrid'
         for ds_id, processed_data_dir in enumerate(self.processed_data_dirs):
-            wav_suffix = '_wf0.wav'
-            txt_suffix = '.txt'
-            ph_suffix = '_ph.txt'
-            tg_suffix = '.TextGrid'
             all_wav_pieces = glob.glob(f'{processed_data_dir}/*/*{wav_suffix}')
 
             for piece_path in all_wav_pieces:
@@ -172,7 +176,7 @@ class SingingBinarizer(BaseBinarizer):
                     phone_encoded = res['phone'] = encoder.encode(ph)
                 except:
                     traceback.print_exc()
-                    raise BinarizationError(f"Empty phoneme")
+                    raise BinarizationError("Empty phoneme")
                 if binarization_args['with_align']:
                     cls.get_align(tg_fn, ph, mel, phone_encoded, res)
         except BinarizationError as e:
@@ -284,7 +288,7 @@ class MidiSingingBinarizer(SingingBinarizer):
                     phone_encoded = res['phone'] = encoder.encode(ph)
                 except:
                     traceback.print_exc()
-                    raise BinarizationError(f"Empty phoneme")
+                    raise BinarizationError("Empty phoneme")
                 if binarization_args['with_align']:
                     cls.get_align(MidiSingingBinarizer.item2ph_durs[item_name], mel, phone_encoded, res)
         except BinarizationError as e:
@@ -306,10 +310,14 @@ class OpencpopBinarizer(MidiSingingBinarizer):
 
     def split_train_test_set(self, item_names):
         item_names = deepcopy(item_names)
-        test_item_names = [x for x in item_names if any([x.startswith(ts) for ts in hparams['test_prefixes']])]
+        test_item_names = [
+            x
+            for x in item_names
+            if any(x.startswith(ts) for ts in hparams['test_prefixes'])
+        ]
         train_item_names = [x for x in item_names if x not in set(test_item_names)]
-        logging.info("train {}".format(len(train_item_names)))
-        logging.info("test {}".format(len(test_item_names)))
+        logging.info(f"train {len(train_item_names)}")
+        logging.info(f"test {len(test_item_names)}")
         return train_item_names, test_item_names
 
     def load_meta_data(self):
@@ -397,7 +405,7 @@ class OpencpopBinarizer(MidiSingingBinarizer):
                     phone_encoded = res['phone'] = encoder.encode(ph)
                 except:
                     traceback.print_exc()
-                    raise BinarizationError(f"Empty phoneme")
+                    raise BinarizationError("Empty phoneme")
                 if binarization_args['with_align']:
                     cls.get_align(OpencpopBinarizer.item2ph_durs[item_name], mel, phone_encoded, res)
         except BinarizationError as e:

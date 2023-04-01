@@ -33,7 +33,7 @@ def get_a_var(obj):  # pragma: no cover
     if isinstance(obj, torch.Tensor):
         return obj
 
-    if isinstance(obj, list) or isinstance(obj, tuple):
+    if isinstance(obj, (list, tuple)):
         for result in map(get_a_var, obj):
             if isinstance(result, torch.Tensor):
                 return result
@@ -52,7 +52,7 @@ def data_loader(fn):
     """
 
     wraps(fn)
-    attr_name = '_lazy_' + fn.__name__
+    attr_name = f'_lazy_{fn.__name__}'
 
     def _get_data_loader(self):
         try:
@@ -69,7 +69,7 @@ def data_loader(fn):
             except AttributeError as e:
                 # Guard against AttributeError suppression. (Issue #142)
                 traceback.print_exc()
-                error = f'{fn.__name__}: An AttributeError was encountered: ' + str(e)
+                error = f'{fn.__name__}: An AttributeError was encountered: {str(e)}'
                 raise RuntimeError(error) from e
             setattr(self, attr_name, value)  # Memoize evaluation.
         return value
@@ -232,9 +232,9 @@ class DP(DataParallel):
 
         for t in itertools.chain(self.module.parameters(), self.module.buffers()):
             if t.device != self.src_device_obj:
-                raise RuntimeError("module must have its parameters and buffers "
-                                   "on device {} (device_ids[0]) but found one of "
-                                   "them on device: {}".format(self.src_device_obj, t.device))
+                raise RuntimeError(
+                    f"module must have its parameters and buffers on device {self.src_device_obj} (device_ids[0]) but found one of them on device: {t.device}"
+                )
 
         inputs, kwargs = self.scatter(inputs, kwargs, self.device_ids)
         if len(self.device_ids) == 1:
@@ -256,10 +256,10 @@ class DP(DataParallel):
 
 class GradientAccumulationScheduler:
     def __init__(self, scheduling: dict):
-        if scheduling == {}:  # empty dict error
+        if not scheduling:  # empty dict error
             raise TypeError("Empty dict cannot be interpreted correct")
 
-        for key in scheduling.keys():
+        for key in scheduling:
             if not isinstance(key, int) or not isinstance(scheduling[key], int):
                 raise TypeError("All epoches and accumulation factor must be integers")
 
@@ -268,7 +268,7 @@ class GradientAccumulationScheduler:
             msg = f"Epochs indexing from 1, epoch {minimal_epoch} cannot be interpreted correct"
             raise IndexError(msg)
         elif minimal_epoch != 1:  # if user didnt define first epoch accumulation factor
-            scheduling.update({1: 1})
+            scheduling[1] = 1
 
         self.scheduling = scheduling
         self.epochs = sorted(scheduling.keys())
@@ -308,15 +308,14 @@ class LatestModelCheckpoint(ModelCheckpoint):
             self.monitor_op = np.greater
             self.best = -np.Inf
             self.mode = 'max'
+        elif 'acc' in self.monitor or self.monitor.startswith('fmeasure'):
+            self.monitor_op = np.greater
+            self.best = -np.Inf
+            self.mode = 'max'
         else:
-            if 'acc' in self.monitor or self.monitor.startswith('fmeasure'):
-                self.monitor_op = np.greater
-                self.best = -np.Inf
-                self.mode = 'max'
-            else:
-                self.monitor_op = np.less
-                self.best = np.Inf
-                self.mode = 'min'
+            self.monitor_op = np.less
+            self.best = np.Inf
+            self.mode = 'min'
         if os.path.exists(f'{self.filepath}/best_valid.npy'):
             self.best = np.load(f'{self.filepath}/best_valid.npy')[0]
 
@@ -325,11 +324,10 @@ class LatestModelCheckpoint(ModelCheckpoint):
                       key=lambda x: -int(re.findall('.*steps\_(\d+)\.ckpt', x)[0]))
 
     def on_epoch_end(self, epoch, logs=None):
-        logs = logs or {}
         self.epochs_since_last_check += 1
-        best_filepath = f'{self.filepath}/{self.prefix}_ckpt_best.pt'
         if self.epochs_since_last_check >= self.period:
             self.epochs_since_last_check = 0
+            best_filepath = f'{self.filepath}/{self.prefix}_ckpt_best.pt'
             filepath = f'{self.filepath}/{self.prefix}_ckpt_steps_{self.task.global_step}.ckpt'
             if self.verbose > 0:
                 logging.info(f'Epoch {epoch:05d}@{self.task.global_step}: saving model to {filepath}')
@@ -338,17 +336,21 @@ class LatestModelCheckpoint(ModelCheckpoint):
                 subprocess.check_call(f'rm -rf "{old_ckpt}"', shell=True)
                 if self.verbose > 0:
                     logging.info(f'Delete ckpt: {os.path.basename(old_ckpt)}')
+            logs = logs or {}
             current = logs.get(self.monitor)
-            if current is not None and self.save_best:
-                if self.monitor_op(current, self.best):
-                    self.best = current
-                    if self.verbose > 0:
-                        logging.info(
-                            f'Epoch {epoch:05d}@{self.task.global_step}: {self.monitor} reached'
-                            f' {current:0.5f} (best {self.best:0.5f}), saving model to'
-                            f' {best_filepath} as top 1')
-                    self._save_model(best_filepath)
-                    np.save(f'{self.filepath}/best_valid.npy', [self.best])
+            if (
+                current is not None
+                and self.save_best
+                and self.monitor_op(current, self.best)
+            ):
+                self.best = current
+                if self.verbose > 0:
+                    logging.info(
+                        f'Epoch {epoch:05d}@{self.task.global_step}: {self.monitor} reached'
+                        f' {current:0.5f} (best {self.best:0.5f}), saving model to'
+                        f' {best_filepath} as top 1')
+                self._save_model(best_filepath)
+                np.save(f'{self.filepath}/best_valid.npy', [self.best])
 
 
 class BaseTrainer:
@@ -379,7 +381,7 @@ class BaseTrainer:
         self.gradient_clip_val = gradient_clip_val
         self.check_val_every_n_epoch = check_val_every_n_epoch
         self.track_grad_norm = track_grad_norm
-        self.on_gpu = True if (gpus and torch.cuda.is_available()) else False
+        self.on_gpu = bool((gpus and torch.cuda.is_available()))
         self.process_position = process_position
         self.weights_summary = weights_summary
         self.max_updates = max_updates
@@ -425,7 +427,7 @@ class BaseTrainer:
         # allow int, string and gpu list
         self.data_parallel_device_ids = [
             int(x) for x in os.environ.get("CUDA_VISIBLE_DEVICES", "").split(",") if x != '']
-        if len(self.data_parallel_device_ids) == 0:
+        if not self.data_parallel_device_ids:
             self.root_gpu = None
             self.on_gpu = False
         else:
@@ -457,10 +459,7 @@ class BaseTrainer:
     @property
     def num_gpus(self):
         gpus = self.data_parallel_device_ids
-        if gpus is None:
-            return 0
-        else:
-            return len(gpus)
+        return 0 if gpus is None else len(gpus)
 
     @property
     def data_parallel(self):
@@ -495,13 +494,11 @@ class BaseTrainer:
         if isinstance(optimizers, Optimizer):
             return [optimizers], []
 
-        # two lists
         elif len(optimizers) == 2 and isinstance(optimizers[0], list):
             optimizers, lr_schedulers = optimizers
             return optimizers, lr_schedulers
 
-        # single list or tuple
-        elif isinstance(optimizers, list) or isinstance(optimizers, tuple):
+        elif isinstance(optimizers, (list, tuple)):
             return optimizers, []
 
     def run_pretrain_routine(self, model):
@@ -509,10 +506,7 @@ class BaseTrainer:
 
         :param model:
         """
-        ref_model = model
-        if self.data_parallel:
-            ref_model = model.module
-
+        ref_model = model.module if self.data_parallel else model
         # give model convenience properties
         ref_model.trainer = self
 
@@ -587,10 +581,8 @@ class BaseTrainer:
 
     @property
     def training_tqdm_dict(self):
-        tqdm_dict = {
-            'step': '{}'.format(self.global_step),
-        }
-        tqdm_dict.update(self.tqdm_metrics)
+        tqdm_dict = {'step': f'{self.global_step}'}
+        tqdm_dict |= self.tqdm_metrics
         return tqdm_dict
 
     # --------------------
@@ -640,14 +632,13 @@ class BaseTrainer:
         # find last epoch
         checkpoints = os.listdir(self.checkpoint_callback.filepath)
         for name in checkpoints:
-            if '.ckpt' in name and not name.endswith('part'):
-                if 'steps_' in name:
-                    steps = name.split('steps_')[1]
-                    steps = int(re.sub('[^0-9]', '', steps))
+            if '.ckpt' in name and not name.endswith('part') and 'steps_' in name:
+                steps = name.split('steps_')[1]
+                steps = int(re.sub('[^0-9]', '', steps))
 
-                    if steps > last_steps:
-                        last_steps = steps
-                        last_ckpt_name = name
+                if steps > last_steps:
+                    last_steps = steps
+                    last_ckpt_name = name
 
         # restore last checkpoint
         if last_ckpt_name is not None:
@@ -735,7 +726,7 @@ class BaseTrainer:
             filepath (str|pathlib.Path): The path to which the checkpoint will be saved.
                 This points to the file that the checkpoint will be stored in.
         """
-        tmp_path = str(filepath) + ".part"
+        tmp_path = f"{str(filepath)}.part"
         torch.save(checkpoint, tmp_path)
         os.replace(tmp_path, filepath)
 
@@ -753,19 +744,14 @@ class BaseTrainer:
         if self.checkpoint_callback is not None and self.checkpoint_callback is not False:
             checkpoint['checkpoint_callback_best'] = self.checkpoint_callback.best
 
-        # save optimizers
-        optimizer_states = []
-        for i, optimizer in enumerate(self.optimizers):
-            if optimizer is not None:
-                optimizer_states.append(optimizer.state_dict())
-
+        optimizer_states = [
+            optimizer.state_dict()
+            for optimizer in self.optimizers
+            if optimizer is not None
+        ]
         checkpoint['optimizer_states'] = optimizer_states
 
-        # save lr schedulers
-        lr_schedulers = []
-        for i, scheduler in enumerate(self.lr_schedulers):
-            lr_schedulers.append(scheduler.state_dict())
-
+        lr_schedulers = [scheduler.state_dict() for scheduler in self.lr_schedulers]
         checkpoint['lr_schedulers'] = lr_schedulers
 
         # add the hparams and state_dict from the model
@@ -777,13 +763,7 @@ class BaseTrainer:
         return checkpoint
 
     def copy_trainer_model_properties(self, model):
-        if isinstance(model, DP):
-            ref_model = model.module
-        elif isinstance(model, DDP):
-            ref_model = model.module
-        else:
-            ref_model = model
-
+        ref_model = model.module if isinstance(model, (DP, DDP)) else model
         for m in [model, ref_model]:
             m.trainer = self
             m.on_gpu = self.on_gpu
@@ -828,23 +808,19 @@ class BaseTrainer:
         if self.num_gpus == 0:
             return
 
-        # single GPU case
-        # in single gpu case we allow ddp so we can train on multiple
-        # nodes, 1 gpu per node
         elif self.num_gpus == 1:
             self.single_gpu = True
             self.use_dp = False
             self.use_ddp = False
             self.root_gpu = 0
             self.data_parallel_device_ids = [0]
-        else:
-            if distributed_backend is not None:
-                self.use_dp = distributed_backend == 'dp'
-                self.use_ddp = distributed_backend == 'ddp'
-            elif distributed_backend is None:
-                self.use_dp = True
-                self.use_ddp = False
+        elif distributed_backend is None:
+            self.use_dp = True
+            self.use_ddp = False
 
+        else:
+            self.use_dp = distributed_backend == 'dp'
+            self.use_ddp = distributed_backend == 'ddp'
         logging.info(f'gpu available: {torch.cuda.is_available()}, used: {self.on_gpu}')
 
     def ddp_train(self, gpu_idx, model):
@@ -894,11 +870,7 @@ class BaseTrainer:
         # override root GPU
         self.root_gpu = gpu_idx
 
-        if self.distributed_backend == 'ddp':
-            device_ids = [gpu_idx]
-        else:
-            device_ids = None
-
+        device_ids = [gpu_idx] if self.distributed_backend == 'ddp' else None
         # allow user to configure ddp
         model = model.configure_ddp(model, device_ids)
 
@@ -965,15 +937,11 @@ class BaseTrainer:
         :param output:
         :return:
         """
-        # ---------------
-        # EXTRACT CALLBACK KEYS
-        # ---------------
-        # all keys not progress_bar or log are candidates for callbacks
-        callback_metrics = {}
-        for k, v in output.items():
-            if k not in ['progress_bar', 'log', 'hiddens']:
-                callback_metrics[k] = v
-
+        callback_metrics = {
+            k: v
+            for k, v in output.items()
+            if k not in ['progress_bar', 'log', 'hiddens']
+        }
         if train and self.use_dp:
             num_gpus = self.num_gpus
             callback_metrics = self.reduce_distributed_output(callback_metrics, num_gpus)
@@ -1116,7 +1084,7 @@ class BaseTrainer:
         self.get_train_dataloader = model.train_dataloader
         if isinstance(self.get_train_dataloader(), torch.utils.data.DataLoader):
             self.num_training_batches = len(self.get_train_dataloader())
-            self.num_training_batches = int(self.num_training_batches)
+            self.num_training_batches = self.num_training_batches
         else:
             self.num_training_batches = float('inf')
             self.is_iterable_train_dataloader = True
@@ -1265,9 +1233,9 @@ class BaseTrainer:
         # hook
         model.on_post_performance_check()
 
-        # add model specific metrics
-        tqdm_metrics = self.training_tqdm_dict
         if not test:
+            # add model specific metrics
+            tqdm_metrics = self.training_tqdm_dict
             self.main_progress_bar.set_postfix(**tqdm_metrics)
 
         # close progress bar
@@ -1293,9 +1261,7 @@ class BaseTrainer:
 
         # handle DP, DDP forward
         if self.use_ddp or self.use_dp:
-            output = model(*args)
-            return output
-
+            return model(*args)
         # single GPU
         if self.single_gpu:
             # for single GPU put inputs on gpu manually
@@ -1305,13 +1271,7 @@ class BaseTrainer:
             batch = self.transfer_batch_to_gpu(batch, root_gpu)
             args[0] = batch
 
-        # CPU
-        if test:
-            output = model.test_step(*args)
-        else:
-            output = model.validation_step(*args)
-
-        return output
+        return model.test_step(*args) if test else model.validation_step(*args)
 
     def train(self):
         model = self.get_model()
@@ -1348,7 +1308,7 @@ class BaseTrainer:
 
             # reset progress bar
             # .reset() doesn't work on disabled progress bar so we should check
-            desc = f'Epoch {epoch + 1}' if not self.is_iterable_train_dataloader else ''
+            desc = '' if self.is_iterable_train_dataloader else f'Epoch {epoch + 1}'
             self.main_progress_bar.set_description(desc)
 
             # changing gradient according accumulation_scheduler
@@ -1409,9 +1369,8 @@ class BaseTrainer:
 
             # when logs should be saved
             should_save_log = (batch_idx + 1) % self.log_save_interval == 0 or early_stop_epoch
-            if should_save_log:
-                if self.proc_rank == 0 and self.logger is not None:
-                    self.logger.save()
+            if should_save_log and self.proc_rank == 0 and self.logger is not None:
+                self.logger.save()
 
             # when metrics should be logged
             should_log_metrics = batch_idx % self.row_log_interval == 0 or early_stop_epoch
@@ -1528,11 +1487,13 @@ class BaseTrainer:
                 if (self.batch_idx + 1) % self.accumulate_grad_batches == 0:
 
                     # track gradient norms when requested
-                    if batch_idx % self.row_log_interval == 0:
-                        if self.track_grad_norm > 0:
-                            model = self.get_model()
-                            grad_norm_dic = model.grad_norm(
-                                self.track_grad_norm)
+                    if (
+                        batch_idx % self.row_log_interval == 0
+                        and self.track_grad_norm > 0
+                    ):
+                        model = self.get_model()
+                        grad_norm_dic = model.grad_norm(
+                            self.track_grad_norm)
 
                     # clip gradients
                     self.clip_gradients()

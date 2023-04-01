@@ -48,8 +48,7 @@ def linear_beta_schedule(timesteps, max_beta=hparams.get('max_beta', 0.01)):
     """
     linear schedule
     """
-    betas = np.linspace(1e-4, max_beta, timesteps)
-    return betas
+    return np.linspace(1e-4, max_beta, timesteps)
 
 
 def cosine_beta_schedule(timesteps, s=0.008):
@@ -91,11 +90,10 @@ class GaussianDiffusion(nn.Module):
 
         if exists(betas):
             betas = betas.detach().cpu().numpy() if isinstance(betas, torch.Tensor) else betas
+        elif 'schedule_type' in hparams.keys():
+            betas = beta_schedule[hparams['schedule_type']](timesteps)
         else:
-            if 'schedule_type' in hparams.keys():
-                betas = beta_schedule[hparams['schedule_type']](timesteps)
-            else:
-                betas = cosine_beta_schedule(timesteps)
+            betas = cosine_beta_schedule(timesteps)
 
         alphas = 1. - betas
         alphas_cumprod = np.cumprod(alphas, axis=0)
